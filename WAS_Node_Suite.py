@@ -24,9 +24,8 @@ import comfy.samplers
 import comfy.sd
 import comfy.utils
 import comfy.clip_vision
-import model_management
+import comfy.model_management
 import folder_paths as comfy_paths
-import model_management
 from comfy_extras.chainner_models import model_loading
 import glob
 import hashlib
@@ -43,9 +42,12 @@ import requests
 import socket
 import subprocess
 import sys
+import datetime
 import time
 import torch
 from tqdm import tqdm
+
+p310_plus = (sys.version_info >= (3, 10))
 
 MANIFEST = {
     "name": "WAS Node Suite",
@@ -720,8 +722,8 @@ class PromptStyles:
 
 class WASDatabase:
     """
-    The WAS Suite Database Class provides a simple key-value database that stores 
-    data in a flatfile using the JSON format. Each key-value pair is associated with 
+    The WAS Suite Database Class provides a simple key-value database that stores
+    data in a flatfile using the JSON format. Each key-value pair is associated with
     a category.
 
     Attributes:
@@ -743,17 +745,21 @@ class WASDatabase:
         self.filepath = filepath
         try:
             with open(filepath, 'r') as f:
-                 self.data = json.load(f)
+                self.data = json.load(f)
         except FileNotFoundError:
             self.data = {}
 
     def catExists(self, category):
-        return self.data.__contains__(category)
-        
+        return category in self.data
+
     def keyExists(self, category, key):
-        return self.data[category].__contains__(key)
+        return category in self.data and key in self.data[category]
 
     def insert(self, category, key, value):
+        if not isinstance(category, str) or not isinstance(key, str):
+            cstr("Category and key must be strings").error.print()
+            return
+
         if category not in self.data:
             self.data[category] = {}
         self.data[category][key] = value
@@ -763,27 +769,32 @@ class WASDatabase:
         if category in self.data and key in self.data[category]:
             self.data[category][key] = value
             self._save()
-            
+
     def updateCat(self, category, dictionary):
         self.data[category].update(dictionary)
         self._save()
-        
+
     def get(self, category, key):
         return self.data.get(category, {}).get(key, None)
-        
+
     def getDB(self):
         return self.data
-        
+
     def insertCat(self, category):
-        if self.data.__contains__(category):
-            cstr(f"The database category `{category}` already exists!").error.print()
+        if not isinstance(category, str):
+            cstr("Category must be a string").error.print()
+            return
+
+        if category in self.data:
+            cstr(f"The database category '{category}' already exists!").error.print()
             return
         self.data[category] = {}
         self._save()
-        
+
     def getDict(self, category):
-        if not self.data.__contains__(category):
-            cstr(f"\033[34mWAS Node Suite\033[0m Error: The database category `{category}` does not exist!").error.print()
+        if category not in self.data:
+            cstr(f"The database category '{category}' does not exist!").error.print()
+            return {}
         return self.data[category]
 
     def delete(self, category, key):
@@ -796,8 +807,10 @@ class WASDatabase:
             with open(self.filepath, 'w') as f:
                 json.dump(self.data, f, indent=4)
         except FileNotFoundError:
-            cstr(f"Cannot save database to file '{self.filepath}'."
-                  " Storing the data in the object instead. Does the folder and node file have write permissions?").warning.print()
+            cstr(f"Cannot save database to file '{self.filepath}'. "
+                 "Storing the data in the object instead. Does the folder and node file have write permissions?").warning.print()
+        except Exception as e:
+            cstr(f"Error while saving JSON data: {e}").error.print()
 
 # Initialize the settings database
 WDB = WASDatabase(WAS_DATABASE)
@@ -1180,7 +1193,7 @@ class WAS_Tools_Class():
         def generate_transition_frames(self, start_frame, end_image, num_frames):
 
             if start_frame is None:
-                return [image]
+                return []
                 
             start_frame = start_frame.convert("RGBA")
             end_image = end_image.convert("RGBA")
@@ -3043,7 +3056,8 @@ class WAS_Image_Crop_Face:
                                 "haarcascade_frontalface_alt2.xml",
                                 "haarcascade_frontalface_alt_tree.xml",
                                 "haarcascade_profileface.xml",
-                                "haarcascade_upperbody.xml"
+                                "haarcascade_upperbody.xml",
+                                "haarcascade_eye.xml"
                                 ],),
                 }
         }
@@ -5455,24 +5469,26 @@ class WAS_Image_Rotate_Hue:
         if hue_shift > 1.0 or hue_shift < 0.0:
             cstr(f"The hue_shift `{cstr.color.LIGHTYELLOW}{hue_shift}{cstr.color.END}` is out of range. Valid range is {cstr.color.BOLD}0.0 - 1.0{cstr.color.END}").error.print()
             hue_shift = 0.0
-        return (pil2tensor(self.rotate_hue(tensor2pil(image), hue_shift)), )
+        shifted_hue = pil2tensor(self.hue_rotation(image, hue_shift))
+        return (shifted_hue, )
 
-    def rotate_hue(self, image, hue_shift=0.0):
+    def hue_rotation(self, image, hue_shift=0.0):
         import colorsys
-        def rgb_to_hls(r, g, b):
-            h, l, s = colorsys.rgb_to_hls(r / 255, g / 255, b / 255)
-            return h, l, s
-        def hls_to_rgb(h, l, s):
-            r, g, b = colorsys.hls_to_rgb(h, l, s)
-            return int(r * 255), int(g * 255), int(b * 255)
+        if hue_shift > 1.0 or hue_shift < 0.0:
+            print(f"The hue_shift '{hue_shift}' is out of range. Valid range is 0.0 - 1.0")
+            hue_shift = 0.0
 
-        rotated_image = Image.new("RGB", image.size)
-        for x in range(image.width):
-            for y in range(image.height):
-                r, g, b = image.getpixel((x, y))
-                h, l, s = rgb_to_hls(r, g, b)
+        pil_image = tensor2pil(image)
+        width, height = pil_image.size
+        rotated_image = Image.new("RGB", (width, height))
+
+        for x in range(width):
+            for y in range(height):
+                r, g, b = pil_image.getpixel((x, y))
+                h, l, s = colorsys.rgb_to_hls(r / 255, g / 255, b / 255)
                 h = (h + hue_shift) % 1.0
-                r, g, b = hls_to_rgb(h, l, s)
+                r, g, b = colorsys.hls_to_rgb(h, l, s)
+                r, g, b = int(r * 255), int(g * 255), int(b * 255)
                 rotated_image.putpixel((x, y), (r, g, b))
 
         return rotated_image
@@ -5592,19 +5608,18 @@ class WAS_Remove_Rembg:
         return {
             "required": {
                 "images": ("IMAGE",),
-                "transparency": (["true","false"],),
+                "transparency": ("BOOLEAN", {"default": True},),
                 "model": (["u2net", "u2netp", "u2net_human_seg", "silueta", "isnet-general-use", "isnet-anime"],),
-                "post_processing": ([False, True],),
-                "only_mask": ([False, True],),
-                "alpha_matting": ([False, True],),
+                "post_processing": ("BOOLEAN", {"default": False}),
+                "only_mask": ("BOOLEAN", {"default": False},),
+                "alpha_matting": ("BOOLEAN", {"default": False},),
                 "alpha_matting_foreground_threshold": ("INT", {"default": 240, "min": 0, "max": 255}),
                 "alpha_matting_background_threshold": ("INT", {"default": 10, "min": 0, "max": 255}),
                 "alpha_matting_erode_size": ("INT", {"default": 10, "min": 0, "max": 255}),
                 "background_color": (["none", "black", "white", "magenta", "chroma green", "chroma blue"],),
-                #"putalpha": ([False, True],),
+                # "putalpha": ("BOOLEAN", {"default": True},),
             },
         }
-
 
     RETURN_TYPES = ("IMAGE",)
     RETURN_NAMES = ("images",)
@@ -5612,46 +5627,81 @@ class WAS_Remove_Rembg:
 
     CATEGORY = "WAS Suite/Image/AI"
 
+     # A helper function to convert from strings to logical boolean
+     # Conforms to https://docs.python.org/3/library/stdtypes.html#truth-value-testing
+     # With the addition of evaluating string representations of Falsey types
+    def __convertToBool(self, x):
+
+        # Evaluate string representation of False types
+        if type(x) == str:
+            x = x.strip()
+            if (x.lower() == 'false'
+                or x.lower() == 'none'
+                or x == '0'
+                or x == '0.0'
+                or x == '0j'
+                or x == "''"
+                or x == '""'
+                or x == "()"
+                or x == "[]"
+                or x == "{}"
+                or x.lower() == "decimal(0)"
+                or x.lower() == "fraction(0,1)"
+                or x.lower() == "set()"
+                or x.lower() == "range(0)"
+            ):
+                return False
+            else:
+                return True
+
+        # Anything else will be evaluated by the bool function
+        return bool(x)
+
     def image_rembg(
-        self, 
-        images, 
-        transparency="true", 
-        model="u2net", 
-        alpha_matting=False, 
-        alpha_matting_foreground_threshold=240,
-        alpha_matting_background_threshold=10,
-        alpha_matting_erode_size=10,
-        post_processing=False,
-        only_mask=False,
-        background_color = "none",
-        #putalpha = False,
+            self,
+            images,
+            transparency=True,
+            model="u2net",
+            alpha_matting=False,
+            alpha_matting_foreground_threshold=240,
+            alpha_matting_background_threshold=10,
+            alpha_matting_erode_size=10,
+            post_processing=False,
+            only_mask=False,
+            background_color="none",
+            # putalpha = False,
     ):
+
+        # ComfyUI will allow strings in place of booleans, validate the input.
+        transparency = transparency if type(transparency) is bool else self.__convertToBool(transparency)
+        alpha_matting = alpha_matting if type(alpha_matting) is bool else self.__convertToBool(alpha_matting)
+        post_processing = post_processing if type(post_processing) is bool else self.__convertToBool(post_processing)
+        only_mask = only_mask if type(only_mask) is bool else self.__convertToBool(only_mask)
 
         if "rembg" not in packages():
             install_package("rembg")
-            
+
         from rembg import remove, new_session
-    
+
         os.environ['U2NET_HOME'] = os.path.join(MODELS_DIR, 'rembg')
         os.makedirs(os.environ['U2NET_HOME'], exist_ok=True)
-    
+
         # Set bgcolor
         bgrgba = None
-        match background_color:
-            case "black":
-                bgrgba = [0, 0, 0, 255]
-            case "white":
-                bgrgba = [255, 255, 255, 255]
-            case "magenta":
-                bgrgba = [255, 0, 255, 255]
-            case "chroma green":
-                bgrgba = [0, 177, 64, 255]
-            case "chroma blue":
-                bgrgba = [0, 71, 187, 255]
-            case _:
-                bgrgba = None
+        if background_color == "black":
+            bgrgba = [0, 0, 0, 255]
+        elif background_color == "white":
+            bgrgba = [255, 255, 255, 255]
+        elif background_color == "magenta":
+            bgrgba = [255, 0, 255, 255]
+        elif background_color == "chroma green":
+            bgrgba = [0, 177, 64, 255]
+        elif background_color == "chroma blue":
+            bgrgba = [0, 71, 187, 255]
+        else:
+            bgrgba = None
 
-        if transparency == "true" and bgrgba is not None:
+        if transparency and bgrgba is not None:
             bgrgba[3] = 0
 
         batch_tensor = []
@@ -5659,20 +5709,20 @@ class WAS_Remove_Rembg:
             image = tensor2pil(image)
             batch_tensor.append(pil2tensor(
                 remove(
-                     image,
+                    image,
                     session=new_session(model),
-                    post_process_mask = post_processing,
-                    alpha_matting = alpha_matting,
-                    alpha_matting_foreground_threshold = alpha_matting_foreground_threshold,
-                    alpha_matting_background_threshold = alpha_matting_background_threshold,
-                    alpha_matting_erode_size = alpha_matting_erode_size,
-                    only_mask = only_mask,
-                    bgcolor = bgrgba,
-                    #putalpha = putalpha,
-                    )
-                    .convert(('RGBA' if transparency == 'true' else 'RGB'))))
+                    post_process_mask=post_processing,
+                    alpha_matting=alpha_matting,
+                    alpha_matting_foreground_threshold=alpha_matting_foreground_threshold,
+                    alpha_matting_background_threshold=alpha_matting_background_threshold,
+                    alpha_matting_erode_size=alpha_matting_erode_size,
+                    only_mask=only_mask,
+                    bgcolor=bgrgba,
+                    # putalpha = putalpha,
+                )
+                .convert(('RGBA' if transparency else 'RGB'))))
         batch_tensor = torch.cat(batch_tensor, dim=0)
-        
+
         return (batch_tensor,)
 
 
@@ -6681,7 +6731,7 @@ class WAS_Image_Ambient_Occlusion:
                             tile_rgb = rgb_normalized[tile_upper:tile_lower, tile_left:tile_right]
                             tile_depth = depth_normalized[tile_upper:tile_lower, tile_left:tile_right]
 
-                            future = executor.submit(process_tile, tile_rgb, tile_depth, tile_x, tile_y, radius)
+                            future = executor.submit(self.process_tile, tile_rgb, tile_depth, tile_x, tile_y, radius)
                             futures.append(future)
 
                     for future in concurrent.futures.as_completed(futures):
@@ -9260,6 +9310,10 @@ class WAS_Text_Multiline:
                     line = line.replace("\n", '')
                 new_text.append(line)
         new_text = "\n".join(new_text)
+        
+        tokens = TextTokens()
+        new_text = tokens.parseTokens(new_text)
+        
         return (new_text, )   
         
 # Text List Node
@@ -9429,6 +9483,14 @@ class WAS_Text_String:
     CATEGORY = "WAS Suite/Text"
 
     def text_string(self, text='', text_b='', text_c='', text_d=''):
+    
+        tokens = TextTokens()
+        
+        text = tokens.parseTokens(text)
+        text_b = tokens.parseTokens(text_b)
+        text_c = tokens.parseTokens(text_c)
+        text_d = tokens.parseTokens(text_d)
+    
         return (text, text_b, text_c, text_d)
 
 
@@ -9445,7 +9507,7 @@ class WAS_Text_String_Truncate:
                 "text": ("STRING", {"forceInput": True}),
                 "truncate_by": (["characters", "words"],),
                 "truncate_from": (["end", "beginning"],),
-                "truncate_to": ("INT", {"default": 10, "min": 1, "max": 99999999, "step": 1}),
+                "truncate_to": ("INT", {"default": 10, "min": -99999999, "max": 99999999, "step": 1}),
             },
             "optional": {
                 "text_b": ("STRING", {"forceInput": True}),
@@ -9474,14 +9536,15 @@ class WAS_Text_String_Truncate:
             cstr("Invalid truncate_by. 'truncate_by' must be either 'characters' or 'words'.").error.print()
         if truncate_by == 'characters':
             if mode == 'beginning':
-                return string[:max_length]
+                return string[:max_length] if max_length >= 0 else string[max_length:]
             else:
-                return string[-max_length:]
+                return string[-max_length:] if max_length >= 0 else string[:max_length]
         words = string.split()
         if mode == 'beginning':
-            return ' '.join(words[:max_length])
+            return ' '.join(words[:max_length]) if max_length >= 0 else ' '.join(words[max_length:])
         else:
-            return ' '.join(words[-max_length:])
+            return ' '.join(words[-max_length:]) if max_length >= 0 else ' '.join(words[:max_length])
+
 
 
 
@@ -9690,18 +9753,19 @@ class WAS_Search_and_Replace:
             }
         }
 
-    RETURN_TYPES = (TEXT_TYPE,)
+    RETURN_TYPES = (TEXT_TYPE, "NUMBER", "FLOAT", "INT")
+    RETURN_NAMES = ("result_text", "replacement_count_number", "replacement_count_float", "replacement_count_int")
     FUNCTION = "text_search_and_replace"
 
     CATEGORY = "WAS Suite/Text/Search"
 
     def text_search_and_replace(self, text, find, replace):
-        return (self.replace_substring(text, find, replace), )
+        modified_text, count = self.replace_substring(text, find, replace)
+        return (modified_text, count, float(count), int(count))
 
     def replace_substring(self, text, find, replace):
-        import re
-        text = re.sub(find, replace, text)
-        return text
+        modified_text, count = re.subn(find, replace, text)
+        return (modified_text, count)
         
         
 # Text Shuffle
@@ -9754,21 +9818,20 @@ class WAS_Search_and_Replace_Input:
             }
         }
 
-    RETURN_TYPES = (TEXT_TYPE,)
+    RETURN_TYPES = (TEXT_TYPE, "NUMBER", "FLOAT", "INT")
+    RETURN_NAMES = ("result_text", "replacement_count_number", "replacement_count_float", "replacement_count_int")
     FUNCTION = "text_search_and_replace"
 
     CATEGORY = "WAS Suite/Text/Search"
 
     def text_search_and_replace(self, text, find, replace):
-   
-        # Parse Text
+        count = 0
         new_text = text
-        tcount = new_text.count(find)
-        for _ in range(tcount):
+        while find in new_text:
             new_text = new_text.replace(find, replace, 1)
+            count += 1
+        return (new_text, count, float(count), int(count))
 
-        return (new_text, )
-        
     @classmethod
     def IS_CHANGED(cls, **kwargs):
         return float("NaN")
@@ -10536,6 +10599,8 @@ class WAS_BLIP_Model_Loader:
             exit
             
         blip_dir = os.path.join(WAS_SUITE_ROOT, 'repos'+os.sep+'BLIP')
+        if blip_dir not in sys.path:
+            sys.path.append(blip_dir)
 
         if not os.path.exists(blip_dir):
             from git.repo.base import Repo
@@ -10628,8 +10693,10 @@ class WAS_BLIP_Analyze_Image:
             ]) 
             image = transform(raw_image).unsqueeze(0).to(device)   
             return image.view(1, -1, image_size, image_size)  # Change the shape of the output tensor       
-    
-        sys.path.append(os.path.join(WAS_SUITE_ROOT, 'repos'+os.sep+'BLIP'))
+        
+        blip_dir = os.path.join(WAS_SUITE_ROOT, 'repos'+os.sep+'BLIP')
+        if blip_dir not in sys.path:
+            sys.path.append(blip_dir)
         
         from torchvision import transforms
         from torchvision.transforms.functional import InterpolationMode
@@ -10884,74 +10951,6 @@ class WAS_CLIPSeg_Batch:
         del inputs, model, result, tensor, masks, mask_images, images_pil
         
         return (images_tensor, masks_tensor, mask_images_tensor)
-
-
-# Lang SAM Model Loader
-# TODO: Fix Lang SAM Dependency Issues 
-
-class WAS_Lang_SAM_Model_Loader:
-    def __init__(self):
-        pass
-        
-    @classmethod
-    def INPUT_TYPES(self):
-        return {
-            "required": {
-                "model_type": (["vit_b", "vit_l", "vit_h"],),
-            }
-        }
-
-    RETURN_TYPES = ("LANG_SAM_MODEL",)
-    RETURN_NAMES = ("lang_sam_model",)
-    
-    CATEGORY = "WAS Suite/Loaders"
-    
-    FUNCTION = "lang_sam_model"
-    
-    def lang_sam_model(self, model_type):
-
-        from lang_sam import LangSAM
-        
-        model = LangSAM(model_type=model_type)
-        model.device = 'cpu'
-
-        return ( model, )
-
-
-# Lang SAM Masking
-
-class WAS_Lang_SAM_Masking:
-    def __init__(self):
-        pass
-        
-    @classmethod
-    def INPUT_TYPES(self):
-        return {
-            "required": {
-                "lang_sam_model": ("LANG_SAM_MODEL",),
-                "image": ("IMAGE",),
-                "prompt": ("STRING", {"default": "", "multiline": False}),
-            }
-        }
-
-    RETURN_TYPES = ("LANG_SAM_MODEL",)
-    RETURN_NAMES = ("lang_sam_model",)
-    
-    CATEGORY = "WAS Suite/Image/Masking"
-    
-    FUNCTION = "lang_sam_masking"
-    
-    def lang_sam_masking(self, lang_sam_model, image, prompt):
-
-        lang_sam_model.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-        masks, boxes, phrases, logits = lang_sam_model.predict(tensor2pil(image), prompt)
-        
-        print(masks)
-        print(boxes)
-        print(logits)
-
-        return ( LandSAM(), )
 
 
 # SAM MODEL LOADER
@@ -11552,7 +11551,10 @@ class WAS_Constant_Number:
             "required": {
                 "number_type": (["integer", "float", "bool"],),
                 "number": ("FLOAT", {"default": 0, "min": -18446744073709551615, "max": 18446744073709551615}),
-            }
+            },
+            "optional": {
+                "number_as_text": (TEXT_TYPE, {"forceInput": (True if TEXT_TYPE == 'STRING' else False)}),
+            }                
         }
 
     RETURN_TYPES = ("NUMBER", "FLOAT", "INT")
@@ -11560,7 +11562,15 @@ class WAS_Constant_Number:
 
     CATEGORY = "WAS Suite/Number"
 
-    def return_constant_number(self, number_type, number):
+    def return_constant_number(self, number_type, number, number_as_text=None):
+    
+        if number_as_text:
+            if number_type == "integer":
+                number = int(number_as_text)
+            elif number_type == "float":
+                number = float(number_as_text)
+            else:
+                number = bool(number_as_text)
 
         # Return number
         if number_type:
@@ -11569,7 +11579,7 @@ class WAS_Constant_Number:
             elif number_type == 'integer':
                 return (float(number), float(number), int(number) )
             elif number_type == 'bool':
-                boolean = (1 if int(number) > 0 else 0)
+                boolean = (1 if float(number) > 0.5 else 0)
                 return (int(boolean), float(boolean), int(boolean) )
             else:
                 return (number, float(number), int(number) )
@@ -11585,8 +11595,9 @@ class WAS_Number_Counter:
         return {
             "required": {
                 "number_type": (["integer", "float"],),
-                "mode": (["increment", "decrement"],),
+                "mode": (["increment", "decrement", "increment_to_stop", "decrement_to_stop"],),
                 "start": ("FLOAT", {"default": 0, "min": -18446744073709551615, "max": 18446744073709551615, "step": 0.01}),
+                "stop": ("FLOAT", {"default": 0, "min": -18446744073709551615, "max": 18446744073709551615, "step": 0.01}),
                 "step": ("FLOAT", {"default": 1, "min": 0, "max": 99999, "step": 0.01}), 
             },
             "optional": {
@@ -11607,9 +11618,7 @@ class WAS_Number_Counter:
 
     CATEGORY = "WAS Suite/Number"
 
-    def increment_number(self, number_type, mode, start, step, unique_id, reset_bool=0):
-    
-        print(unique_id)
+    def increment_number(self, number_type, mode, start, stop, step, unique_id, reset_bool=0):
 
         counter = int(start) if mode == 'integer' else start
         if self.counters.__contains__(unique_id):
@@ -11620,8 +11629,12 @@ class WAS_Number_Counter:
             
         if mode == 'increment':
             counter += step
-        else:
+        elif mode == 'deccrement':
             counter -= step
+        elif mode == 'increment_to_stop':
+            counter = counter + step if counter < stop else counter
+        elif mode == 'decrement_to_stop':
+            counter = counter - step if counter > stop else counter 
             
         self.counters[unique_id] = counter
         
@@ -11630,8 +11643,6 @@ class WAS_Number_Counter:
         return ( result, float(counter), int(counter) )
             
         
-
-
 # NUMBER TO SEED
 
 class WAS_Number_To_Seed:
@@ -11933,6 +11944,60 @@ class WAS_Number_Multiple_Of:
 
 
 #! MISC
+
+
+# Bus.  Converts the 5 main connectors into one, and back again.  You can provide a bus as input
+#       or the 5 separate inputs, or a combination.  If you provide a bus input and a separate
+#       input (e.g. a model), the model will take precedence.
+#
+#       The term 'bus' comes from computer hardware, see https://en.wikipedia.org/wiki/Bus_(computing)
+class WAS_Bus:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required":{},
+            "optional": {
+                "bus" : ("BUS",),
+                "model": ("MODEL",),
+                "clip": ("CLIP",),
+                "vae": ("VAE",),
+                "positive": ("CONDITIONING",),
+                "negative": ("CONDITIONING",),
+            }
+        }
+    RETURN_TYPES = ("BUS", "MODEL", "CLIP", "VAE", "CONDITIONING", "CONDITIONING",)
+    RETURN_NAMES = ("bus", "model", "clip", "vae", "positive",     "negative")
+    FUNCTION = "bus_fn"
+    CATEGORY = "WAS Suite/Utilities"
+
+    def bus_fn(self, bus=(None,None,None,None,None), model=None, clip=None, vae=None, positive=None, negative=None):
+
+        # Unpack the 5 constituents of the bus from the bus tuple.
+        (bus_model, bus_clip, bus_vae, bus_positive, bus_negative) = bus
+
+        # If you pass in specific inputs, they override what comes from the bus.
+        out_model       = model     or bus_model
+        out_clip        = clip      or bus_clip
+        out_vae         = vae       or bus_vae
+        out_positive    = positive  or bus_positive
+        out_negative    = negative  or bus_negative
+
+        # Squash all 5 inputs into the output bus tuple.
+        out_bus = (out_model, out_clip, out_vae, out_positive, out_negative)
+
+        if not out_model:
+            raise ValueError('Either model or bus containing a model should be supplied')
+        if not out_clip:
+            raise ValueError('Either clip or bus containing a clip should be supplied')
+        if not out_vae:
+            raise ValueError('Either vae or bus containing a vae should be supplied')
+        # We don't insist that a bus contains conditioning.
+
+        return (out_bus, out_model, out_clip, out_vae, out_positive, out_negative)
+
 
 # Image Width and Height to Number
 
@@ -12589,7 +12654,7 @@ class WAS_Diffusers_Loader:
                     model_path = os.path.join(search_path, model_path)
                     break
 
-        out = comfy.diffusers_convert.load_diffusers(model_path, fp16=model_management.should_use_fp16(), output_vae=output_vae, output_clip=output_clip, embedding_directory=comfy_paths.get_folder_paths("embeddings"))
+        out = comfy.diffusers_convert.load_diffusers(model_path, fp16=comfy.model_management.should_use_fp16(), output_vae=output_vae, output_clip=output_clip, embedding_directory=comfy_paths.get_folder_paths("embeddings"))
         return (out[0], out[1], out[2], os.path.basename(model_path))
 
 
@@ -12608,6 +12673,34 @@ class WAS_unCLIP_Checkpoint_Loader:
         ckpt_path = comfy_paths.get_full_path("checkpoints", ckpt_name)
         out = comfy.sd.load_checkpoint_guess_config(ckpt_path, output_vae=True, output_clip=True, output_clipvision=True, embedding_directory=comfy_paths.get_folder_paths("embeddings"))
         return (out[0], out[1], out[2], out[3], os.path.splitext(os.path.basename(ckpt_name))[0])
+
+
+class WAS_Lora_Input_Switch:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "model_a": ("MODEL",),
+                "clip_a": ("CLIP",),
+                "model_b": ("MODEL",),
+                "clip_b": ("CLIP",),
+                "boolean_number": ("NUMBER",),
+            }
+        }
+    RETURN_TYPES = ("MODEL", "CLIP")
+    FUNCTION = "lora_input_switch"
+
+    CATEGORY = "WAS Suite/Logic"
+
+    def lora_input_switch(self, model_a, clip_a, model_b, clip_b, boolean_number=1):
+        if int(round(boolean_number)) == 1:
+            return (model_a, clip_a)
+        else:
+            return (model_b, clip_b)
+
 
 class WAS_Lora_Loader:
     def __init__(self):
@@ -13100,6 +13193,7 @@ class WAS_Integer_Place_Counter:
 NODE_CLASS_MAPPINGS = {
     "BLIP Model Loader": WAS_BLIP_Model_Loader,
     "Blend Latents": WAS_Blend_Latents,
+    "Bus Node": WAS_Bus,
     "Cache Node": WAS_Cache,
     "Checkpoint Loader": WAS_Checkpoint_Loader, 
     "Checkpoint Loader (Simple)": WAS_Checkpoint_Loader_Simple,
@@ -13201,6 +13295,7 @@ NODE_CLASS_MAPPINGS = {
     "Load Image Batch": WAS_Load_Image_Batch,
     "Load Text File": WAS_Text_Load_From_File,
     "Load Lora": WAS_Lora_Loader,
+    "Lora Input Switch": WAS_Lora_Input_Switch,
     "Masks Add": WAS_Mask_Add,
     "Masks Subtract": WAS_Mask_Subtract,
     "Mask Arbitrary Region": WAS_Mask_Arbitrary_Region,
@@ -13348,7 +13443,10 @@ if os.path.exists(BKAdvCLIP_dir):
             new_text, text_vars = parse_prompt_vars(new_text)
             cstr(f"CLIPTextEncode Prased Prompt:\n {new_text}").msg.print()
             
-            encode = AdvancedCLIPTextEncode().encode(clip, new_text, token_normalization, weight_interpretation)     
+            encode = AdvancedCLIPTextEncode().encode(clip, new_text, token_normalization, weight_interpretation)  
+
+            sys.path.remove(BKAdvCLIP_dir)
+
             return ([[encode[0][0][0], encode[0][0][1]]], new_text, text, { "ui": { "string": new_text } } )
                  
                 

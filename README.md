@@ -1,4 +1,4 @@
-# **WAS** Node Suite &nbsp; [![Colab](https://camo.githubusercontent.com/84f0493939e0c4de4e6dbe113251b4bfb5353e57134ffd9fcab6b8714514d4d1/68747470733a2f2f636f6c61622e72657365617263682e676f6f676c652e636f6d2f6173736574732f636f6c61622d62616467652e737667)](https://colab.research.google.com/github/WASasquatch/comfyui-colab-was-node-suite/blob/main/ComfyUI_%2B_WAS_Node_Suite.ipynb) [![Hits](https://hits.seeyoufarm.com/api/count/incr/badge.svg?url=https%3A%2F%2Fgithub.com%2FWASasquatch%2Fwas-node-suite-comfyui&count_bg=%233D9CC8&title_bg=%23555555&icon=&icon_color=%23E7E7E7&title=hits&edge_flat=false)](https://hits.seeyoufarm.com) [![Donate](https://img.shields.io/badge/Donate-PayPal-blue.svg)](https://paypal.me/ThompsonJordan?country.x=US&locale.x=en_US)
+# **WAS** Node Suite &nbsp; [![Colab](https://camo.githubusercontent.com/84f0493939e0c4de4e6dbe113251b4bfb5353e57134ffd9fcab6b8714514d4d1/68747470733a2f2f636f6c61622e72657365617263682e676f6f676c652e636f6d2f6173736574732f636f6c61622d62616467652e737667)](https://colab.research.google.com/github/WASasquatch/was-node-suite-comfyui/blob/main/ComfyUI_%2B_WAS_Node_Suite_and_ComfyUI_Manager.ipynb) [![Hits](https://hits.seeyoufarm.com/api/count/incr/badge.svg?url=https%3A%2F%2Fgithub.com%2FWASasquatch%2Fwas-node-suite-comfyui&count_bg=%233D9CC8&title_bg=%23555555&icon=&icon_color=%23E7E7E7&title=hits&edge_flat=false)](https://hits.seeyoufarm.com) [![Donate](https://img.shields.io/badge/Donate-PayPal-blue.svg)](https://paypal.me/ThompsonJordan?country.x=US&locale.x=en_US)
 
 <p align="center">
     <img src="https://user-images.githubusercontent.com/1151589/228982359-4a6215cc-3ca9-4c24-8a7b-d229d7bce277.png">
@@ -36,6 +36,7 @@
  - Bounded Image Blend with Mask: Blend a bounds image by mask
  - Bounded Image Crop: Crop a bounds image
  - Bounded Image Crop with Mask: Crop a bounds image by mask
+ - Bus Node: condense the 5 common connectors into one, keep your workspace tidy (Model, Clip, VAE, Positive Conditioning, Negative Conditioning)
  - Cache Node: Cache Latnet, Tensor Batches (Image), and Conditioning to disk to use later.
  - CLIPTextEncode (NSP): Parse noodle soups from the NSP pantry, or parse wildcards from a directory containing A1111 style wildacrds.
    - Wildcards are in the style of `__filename__`, which also includes subdirectories like `__appearance/haircolour__` (if you noodle_key is set to `__`)
@@ -43,7 +44,7 @@
      - `    "wildcards_path": "E:\\python\\automatic\\webui3\\stable-diffusion-webui\\extensions\\sd-dynamic-prompts\\wildcards"`
      - If no path is set the wildcards dir is located at the root of WAS Node Suite as `/wildcards`
  - CLIP Input Switch: Switch between two CLIP inputs based on a boolean switch.
- - CLIP Vision Input Switch: Switch between two CLIP Vision inputs based on a boolean swith.
+ - CLIP Vision Input Switch: Switch between two CLIP Vision inputs based on a boolean switch.
  - Conditioning Input Switch: Switch between two conditioning inputs.
  - Constant Number
  - Control Net Model Input Switch: Switch between two Control Net Model inputs based on a boolean switch.
@@ -95,7 +96,7 @@
  - Image Generate Gradient: Generate a gradient map with desired stops and colors
  - Image High Pass Filter: Apply a high frequency pass to the image returning the details
  - Image History Loader: Load images from history based on the Load Image Batch node. Can define max history in config file. *(requires restart to show last sessions files at this time)*
- - Image Input Switch: Switch between two image inputs
+ - Image Input Switch: Switch between two image inputs based on a boolean switch
  - Image Levels Adjustment: Adjust the levels of a image
  - Image Load: Load a *image* from any path on the system, or a url starting with `http`
  - Image Median Filter: Apply a median filter to a image, such as to smooth out details in surfaces
@@ -184,21 +185,26 @@
  - Latent Noise Injection: Inject latent noise into a latent image
  - Latent Size to Number: Latent sizes in tensor width/height
  - Latent Upscale by Factor: Upscale a latent image by a factor
- - Latent Input Switch: Switch between two latent inputs 
+ - Latent Input Switch: Switch between two latent inputs based on a boolean switch
  - Logic Boolean: A simple `1` or `0` output to use with logic
+ - Lora Input Switch: Switch between two LORAs based on a boolean switch
  - MiDaS Model Loader: Load a MiDaS model as an optional input for MiDaS Depth Approximation
  - MiDaS Depth Approximation: Produce a depth approximation of a single image input
  - MiDaS Mask Image: Mask a input image using MiDaS with a desired color
  - Number Operation
  - Number to Seed
  - Number to Float
- - Number Input Switch: Switch between two number inputs
+ - Number Input Switch: Switch between two number inputs based on a boolean switch
  - Number Input Condition: Compare between two inputs or against the A input
  - Number to Int
  - Number to String
  - Number to Text
  - Perlin Power Fractal Latent: Create a power fractal based latent image. Doesn't work with all samplers (unless you add noise). 
  - Random Number
+   - Random integer between min and max (inclusive), uniformly distributed random number
+   - Random float between min and max (inclusive), uniformly distributed random number
+   - Random number from 0 to 1 inclusive, this will be a 0 or 1 boolean if you use the 'int' output
+   - Random shuffled list of integers between min and max inclusive.  E.g. if min=0 and max=3, a possible outcome would be the string '3,1,2,0'
  - Save Text File: Save a text string to a file
  - Samples Passthrough (Stat System): Logs RAM, VRAM, and Disk usage to the console.
  - Seed: Return a seed
