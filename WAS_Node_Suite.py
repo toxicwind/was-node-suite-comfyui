@@ -6991,9 +6991,10 @@ class WAS_Export_API:
                 "filename_prefix": ("STRING", {"default": "ComfyUI_Prompt"}),
                 "filename_delimiter": ("STRING", {"default":"_"}),
                 "filename_number_padding": ("INT", {"default":4, "min":2, "max":9, "step":1}),
+                "parse_text_tokens": ("BOOLEAN", {"default": False})
             },
             "hidden": {
-                "prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"
+                "prompt": "PROMPT"
             }
         }
 
@@ -7004,7 +7005,7 @@ class WAS_Export_API:
     CATEGORY = "WAS Suite/Debug"
 
     def export_api(self, output_path=None, filename_prefix="ComfyUI", filename_number_padding=4,
-                    filename_delimiter='_', prompt=None, extra_pnginfo=None, save_prompt_api="true"):
+                    filename_delimiter='_', prompt=None, save_prompt_api="true", parse_text_tokens=False):
         delimiter = filename_delimiter
         number_padding = filename_number_padding if filename_number_padding > 1 else 4
 
@@ -7032,6 +7033,10 @@ class WAS_Export_API:
         output_file = os.path.abspath(os.path.join(output_path, file))
 
         if prompt:
+
+            if parse_text_tokens:
+                prompt = self.parse_prompt(prompt, tokens, keys_to_parse)
+
             prompt_json = json.dumps(prompt, indent=4)
             cstr("Prompt API JSON").msg.print()
             print(prompt_json)
@@ -7044,6 +7049,20 @@ class WAS_Export_API:
                 cstr(f"Output file path: {output_file}").msg.print()
 
         return {"ui": {"string": prompt_json}}
+
+    def parse_prompt(self, obj, tokens, keys_to_parse):
+        if isinstance(obj, dict):
+            return {
+                key: self.parse_prompt(value, tokens, keys_to_parse) 
+                if key in keys_to_parse else value 
+                for key, value in obj.items()
+            }
+        elif isinstance(obj, list):
+            return [self.parse_prompt(element, tokens, keys_to_parse) for element in obj]
+        elif isinstance(obj, str):
+            return tokens.parseTokens(obj)
+        else:
+            return obj
 
 
 # Image Save (NSP Compatible)
@@ -7122,9 +7141,9 @@ class WAS_Image_Save:
         
         # Find existing counter values
         if filename_number_start == 'true':
-            pattern = f"(\\d{{{filename_number_padding}}}){re.escape(delimiter)}{re.escape(filename_prefix)}"
+            pattern = f"(\\d+){re.escape(delimiter)}{re.escape(filename_prefix)}"
         else:
-            pattern = f"{re.escape(filename_prefix)}{re.escape(delimiter)}(\\d{{{filename_number_padding}}})"
+            pattern = f"{re.escape(filename_prefix)}{re.escape(delimiter)}(\\d+)"
         existing_counters = [
             int(re.search(pattern, filename).group(1))
             for filename in os.listdir(output_path)
