@@ -504,14 +504,39 @@ def nsp_parse(text, seed=0, noodle_key='__', nspterminology=None, pantry_path=No
 
     return new_text
     
-# Simple wildcard parser:
+# Advanced wildcard parser:
+import os
+import hashlib
+import cupy as cp
+import numpy as np
+import mmap
+import struct
+
+def custom_seed(seed_str):
+    # Generate a seed from a string using a hash function
+    seed_hash = int(hashlib.sha256(seed_str.encode('utf-8')).hexdigest(), 16)
+    seed_hash %= 2**64  # Ensure the value is within the range of a 64-bit integer
+    seed_hash_bytes = struct.pack('Q', seed_hash)  # Convert to bytes
+    return int.from_bytes(seed_hash_bytes, byteorder='big')  # Convert bytes to an integer
 
 def replace_wildcards(text, seed=None, noodle_key='__'):
-    def random_line_from_file(file_path):
-        with open(file_path, "r", encoding="utf-8", errors="ignore") as file:
-            non_comment_lines = [line.strip() for line in file if not line.startswith(('#', '//'))]
-        return system_random.choice(non_comment_lines) if non_comment_lines else None
+    def get_random_line(file_path, seed, key):
+        with open(file_path, "rb") as f:
+            mmapped_file = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+            lines = mmapped_file.read().split(b'\n')
+            line_count = len(lines)
 
+        if seed is not None:
+            custom_seed_value = custom_seed(str(seed) + key)
+            cp.random.seed(custom_seed_value)
+            
+            rand_index = int(cp.random.randint(0, line_count).tolist())
+        else:
+            rand_index = np.random.randint(0, line_count)
+
+        return lines[rand_index].decode('utf-8', 'replace').strip()
+
+    # Configuration and Initialization (Assuming getSuiteConfig and WAS_SUITE_ROOT are defined elsewhere)
     conf = getSuiteConfig()
     # Default wildcard directory
     wildcard_dir = os.path.join(WAS_SUITE_ROOT, 'wildcards')
@@ -533,28 +558,15 @@ def replace_wildcards(text, seed=None, noodle_key='__'):
     for root, dirs, files in os.walk(wildcard_dir):
         for file in files:
             file_path = os.path.join(root, file)
-            key = os.path.relpath(file_path, wildcard_dir).replace(os.path.sep, "/").rsplit(".", 1)[0]
-            key_path_dict[f"{noodle_key}{key}{noodle_key}"] = os.path.abspath(file_path)
+            key = f"{noodle_key}{os.path.splitext(file)[0]}{noodle_key}"
+            key_path_dict[key] = os.path.abspath(file_path)
 
-    # Set the random seed for reproducibility if provided
-    if seed:
-        system_random.seed(seed)
-
-    # Replace wildcards with random lines
-    while noodle_key in text:
-        key_start = text.find(noodle_key)
-        key_end = text.find(noodle_key, key_start + len(noodle_key))
-        if key_start != -1 and key_end != -1:
-            key = text[key_start:key_end + len(noodle_key)]
-            file_path = key_path_dict.get(key)
-            if file_path:
-                random_line = random_line_from_file(file_path)
-                if random_line:
-                    # Replace the wildcard with the selected random line
-                    text = text.replace(key, random_line, 1)
+    # Replace wildcards in text directly without caching
+    for key, file_path in key_path_dict.items():
+        random_line = get_random_line(file_path, seed, key)
+        text = text.replace(key, random_line)
 
     return text
-
 
 # Parse Prompt Variables
     
@@ -2943,7 +2955,6 @@ class WAS_Image_Style_Filter:
                     "perpetua",
                     "reyes",
                     "rise",
-                    "sci-fi",
                     "slumber",
                     "stinson",
                     "toaster",
@@ -3558,12 +3569,14 @@ class WAS_Image_Paste_Crop_Location:
     CATEGORY = "WAS Suite/Image/Process"
     
     def image_paste_crop_location(self, image, crop_image, top=0, left=0, right=256, bottom=256, crop_blending=0.25, crop_sharpening=0):
-
         result_image, result_mask = self.paste_image(tensor2pil(image), tensor2pil(crop_image), top, left, right, bottom, crop_blending, crop_sharpening)
         return (result_image, result_mask)
     
     def paste_image(self, image, crop_image, top=0, left=0, right=256, bottom=256, blend_amount=0.25, sharpen_amount=1):
-    
+
+        image = image.convert("RGBA")
+        crop_image = crop_image.convert("RGBA")
+        
         def inset_border(image, border_width=20, border_color=(0)):
             width, height = image.size
             bordered_image = Image.new(image.mode, (width, height), border_color)
@@ -3571,7 +3584,7 @@ class WAS_Image_Paste_Crop_Location:
             draw = ImageDraw.Draw(bordered_image)
             draw.rectangle((0, 0, width-1, height-1), outline=border_color, width=border_width)
             return bordered_image
-    
+
         img_width, img_height = image.size
         
         # Ensure that the coordinates are within the image bounds
@@ -3581,9 +3594,9 @@ class WAS_Image_Paste_Crop_Location:
         right = min(max(right, 0), img_width)
         
         crop_size = (right - left, bottom - top)
-        crop_img = crop_image.convert("RGB")
-        crop_img = crop_img.resize(crop_size)
-            
+        crop_img = crop_image.resize(crop_size)
+        crop_img = crop_img.convert("RGBA")
+
         if sharpen_amount > 0:
             for _ in range(sharpen_amount):
                 crop_img = crop_img.filter(ImageFilter.SHARPEN)
@@ -3594,24 +3607,103 @@ class WAS_Image_Paste_Crop_Location:
             blend_amount = 0.0
         blend_ratio = (max(crop_size) / 2) * float(blend_amount)
 
-        blend = image.convert("RGBA")
+        blend = image.copy()
         mask = Image.new("L", image.size, 0)
         
         mask_block = Image.new("L", crop_size, 255)
         mask_block = inset_border(mask_block, int(blend_ratio/2), (0))
      
         Image.Image.paste(mask, mask_block, (left, top))
-        Image.Image.paste(blend, crop_img, (left, top))
-
+        blend.paste(crop_img, (left, top), crop_img)
+        
         mask = mask.filter(ImageFilter.BoxBlur(radius=blend_ratio/4))
         mask = mask.filter(ImageFilter.GaussianBlur(radius=blend_ratio/4))
-
+        
         blend.putalpha(mask)
-        image = Image.alpha_composite(image.convert("RGBA"), blend)
+        image = Image.alpha_composite(image, blend)
             
-        return (pil2tensor(image.convert('RGB')), pil2tensor(mask.convert('RGB'))) 
+        return (pil2tensor(image), pil2tensor(mask.convert('RGB')))
+    
 
 # IMAGE GRID IMAGE
+
+class WAS_Image_Grid_Image_Batch:
+    def __init__(self):
+        pass
+        
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "images": ("IMAGE",),
+                "border_width": ("INT", {"default":3, "min": 0, "max": 100, "step":1}),
+                "number_of_columns": ("INT", {"default":6, "min": 1, "max": 24, "step":1}),
+                "max_cell_size": ("INT", {"default":256, "min":32, "max":2048, "step":1}),
+                "border_red": ("INT", {"default":0, "min": 0, "max": 255, "step":1}),
+                "border_green": ("INT", {"default":0, "min": 0, "max": 255, "step":1}),
+                "border_blue": ("INT", {"default":0, "min": 0, "max": 255, "step":1}),
+            }
+        }
+        
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "smart_grid_image"
+    
+    CATEGORY = "WAS Suite/Image/Process"
+
+    def smart_grid_image(self, images, number_of_columns=6, max_cell_size=256, add_border=False, border_red=255, border_green=255, border_blue=255, border_width=3):
+        
+        cols = number_of_columns
+        border_color = (border_red, border_green, border_blue)
+
+        images_resized = []
+        max_row_height = 0
+        
+        for tensor_img in images:
+            img = tensor2pil(tensor_img)
+            img_w, img_h = img.size
+            aspect_ratio = img_w / img_h
+
+            if img_w > img_h:
+                cell_w = min(img_w, max_cell_size)
+                cell_h = int(cell_w / aspect_ratio)
+            else:
+                cell_h = min(img_h, max_cell_size)
+                cell_w = int(cell_h * aspect_ratio)
+            
+            img_resized = img.resize((cell_w, cell_h))
+
+            if add_border:
+                img_resized = ImageOps.expand(img_resized, border=border_width // 2, fill=border_color)
+
+            images_resized.append(img_resized)
+            max_row_height = max(max_row_height, cell_h)
+            
+        max_row_height = int(max_row_height)
+        total_images = len(images_resized)
+        rows = math.ceil(total_images / cols)
+
+        grid_width = cols * max_cell_size + (cols - 1) * border_width
+        grid_height = rows * max_row_height + (rows - 1) * border_width
+        
+        new_image = Image.new('RGB', (grid_width, grid_height), border_color)
+
+        for i, img in enumerate(images_resized):
+            x = (i % cols) * (max_cell_size + border_width)
+            y = (i // cols) * (max_row_height + border_width)
+            
+            img_w, img_h = img.size
+            paste_x = x + (max_cell_size - img_w) // 2
+            paste_y = y + (max_row_height - img_h) // 2
+
+            new_image.paste(img, (paste_x, paste_y, paste_x + img_w, paste_y + img_h))
+
+        if add_border:
+            new_image = ImageOps.expand(new_image, border=border_width, fill=border_color)
+
+        return (pil2tensor(new_image), )
+
+
+# IMAGE GRID IMAGE FROM PATH
 
 class WAS_Image_Grid_Image:
     def __init__(self):
@@ -3812,7 +3904,7 @@ class WAS_Image_Morph_GIF_Writer:
                 "duration_ms": ("FLOAT", {"default":0.1, "min":0.1, "max":60000.0, "step":0.1}),
                 "loops": ("INT", {"default":0, "min":0, "max":100, "step":1}),
                 "max_size": ("INT", {"default":512, "min":128, "max":1280, "step":1}),
-                "output_path": ("STRING", {"default": "./ComfyUI/output", "multiline": False}),
+                "output_path": ("STRING", {"default": comfy_paths.output_directory, "multiline": False}),
                 "filename": ("STRING", {"default": "morph_writer", "multiline": False}),
             }
         }
@@ -3822,23 +3914,23 @@ class WAS_Image_Morph_GIF_Writer:
         return float("NaN")
         
     RETURN_TYPES = ("IMAGE",TEXT_TYPE,TEXT_TYPE)
-    RETURN_NAMES = ("IMAGE_PASS","filepath_text","filename_text")
+    RETURN_NAMES = ("image_pass","filepath_text","filename_text")
     FUNCTION = "write_to_morph_gif"
     
     CATEGORY = "WAS Suite/Animation/Writer"
     
     def write_to_morph_gif(self, image, transition_frames=10, image_delay_ms=10, duration_ms=0.1, loops=0, max_size=512, 
                             output_path="./ComfyUI/output", filename="morph"):
-                
+        
         if 'imageio' not in packages():
             install_package("imageio")
         
         if output_path.strip() in [None, "", "."]:
             output_path = "./ComfyUI/output"
-            
-        if image == None:
-            image = pil2tensor(Image.new("RGB", (512,512), (0,0,0)))
-            
+        
+        if image is None:
+            image = pil2tensor(Image.new("RGB", (512, 512), (0, 0, 0))).unsqueeze(0)
+        
         if transition_frames < 2:
             transition_frames = 2
         elif transition_frames > 60:
@@ -3851,16 +3943,19 @@ class WAS_Image_Morph_GIF_Writer:
             
         tokens = TextTokens()
         output_path = os.path.abspath(os.path.join(*tokens.parseTokens(output_path).split('/')))
-        output_file = os.path.join(output_path, tokens.parseTokens(filename)+'.gif')
+        output_file = os.path.join(output_path, tokens.parseTokens(filename) + '.gif')
         
         if not os.path.exists(output_path):
             os.makedirs(output_path, exist_ok=True)
         
         WTools = WAS_Tools_Class()
         GifMorph = WTools.GifMorphWriter(int(transition_frames), int(duration_ms), int(image_delay_ms))
-        GifMorph.write(tensor2pil(image), output_file)
         
-        return (image, output_file, filename)        
+        for img in image:
+            pil_img = tensor2pil(img)
+            GifMorph.write(pil_img, output_file)
+        
+        return (image, output_file, filename)    
 
 # IMAGE MORPH GIF BY PATH
 
@@ -6895,9 +6990,10 @@ class WAS_Export_API:
                 "filename_prefix": ("STRING", {"default": "ComfyUI_Prompt"}),
                 "filename_delimiter": ("STRING", {"default":"_"}),
                 "filename_number_padding": ("INT", {"default":4, "min":2, "max":9, "step":1}),
+                "parse_text_tokens": ("BOOLEAN", {"default": False})
             },
             "hidden": {
-                "prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"
+                "prompt": "PROMPT"
             }
         }
 
@@ -6908,7 +7004,7 @@ class WAS_Export_API:
     CATEGORY = "WAS Suite/Debug"
 
     def export_api(self, output_path=None, filename_prefix="ComfyUI", filename_number_padding=4,
-                    filename_delimiter='_', prompt=None, extra_pnginfo=None, save_prompt_api="true"):
+                    filename_delimiter='_', prompt=None, save_prompt_api="true", parse_text_tokens=False):
         delimiter = filename_delimiter
         number_padding = filename_number_padding if filename_number_padding > 1 else 4
 
@@ -6936,6 +7032,10 @@ class WAS_Export_API:
         output_file = os.path.abspath(os.path.join(output_path, file))
 
         if prompt:
+
+            if parse_text_tokens:
+                prompt = self.parse_prompt(prompt, tokens, keys_to_parse)
+
             prompt_json = json.dumps(prompt, indent=4)
             cstr("Prompt API JSON").msg.print()
             print(prompt_json)
@@ -6948,6 +7048,20 @@ class WAS_Export_API:
                 cstr(f"Output file path: {output_file}").msg.print()
 
         return {"ui": {"string": prompt_json}}
+
+    def parse_prompt(self, obj, tokens, keys_to_parse):
+        if isinstance(obj, dict):
+            return {
+                key: self.parse_prompt(value, tokens, keys_to_parse) 
+                if key in keys_to_parse else value 
+                for key, value in obj.items()
+            }
+        elif isinstance(obj, list):
+            return [self.parse_prompt(element, tokens, keys_to_parse) for element in obj]
+        elif isinstance(obj, str):
+            return tokens.parseTokens(obj)
+        else:
+            return obj
 
 
 # Image Save (NSP Compatible)
@@ -7026,9 +7140,9 @@ class WAS_Image_Save:
         
         # Find existing counter values
         if filename_number_start == 'true':
-            pattern = f"(\\d{{{filename_number_padding}}}){re.escape(delimiter)}{re.escape(filename_prefix)}"
+            pattern = f"(\\d+){re.escape(delimiter)}{re.escape(filename_prefix)}"
         else:
-            pattern = f"{re.escape(filename_prefix)}{re.escape(delimiter)}(\\d{{{filename_number_padding}}})"
+            pattern = f"{re.escape(filename_prefix)}{re.escape(delimiter)}(\\d+)"
         existing_counters = [
             int(re.search(pattern, filename).group(1))
             for filename in os.listdir(output_path)
@@ -7059,14 +7173,30 @@ class WAS_Image_Save:
             i = 255. * image.cpu().numpy()
             img = Image.fromarray(np.clip(i, 0, 255).astype(np.uint8))
             
-            metadata = PngInfo()
-            if embed_workflow == 'true':
+            # Delegate metadata/pnginfo
+            if extension == 'webp':
+                img_exif = img.getexif()
+                workflow_metadata = ''
+                prompt_str = ''
                 if prompt is not None:
-                    metadata.add_text("prompt", json.dumps(prompt))
+                    prompt_str = json.dumps(prompt)
+                    img_exif[0x010f] = "Prompt:" + prompt_str
                 if extra_pnginfo is not None:
                     for x in extra_pnginfo:
-                        metadata.add_text(x, json.dumps(extra_pnginfo[x]))
+                        workflow_metadata += json.dumps(extra_pnginfo[x])
+                img_exif[0x010e] = "Workflow:" + workflow_metadata
+                exif_data = img_exif.tobytes()
+            else:
+                metadata = PngInfo()
+                if embed_workflow == 'true':
+                    if prompt is not None:
+                        metadata.add_text("prompt", json.dumps(prompt))
+                    if extra_pnginfo is not None:
+                        for x in extra_pnginfo:
+                            metadata.add_text(x, json.dumps(extra_pnginfo[x]))
+                exif_data = metadata
 
+            # Delegate the filename stuffs
             if overwrite_mode == 'prefix_as_filename':
                 file = f"{filename_prefix}{file_extension}"
             else:
@@ -7076,24 +7206,27 @@ class WAS_Image_Save:
                     file = f"{filename_prefix}{delimiter}{counter:0{number_padding}}{file_extension}"
                 if os.path.exists(os.path.join(output_path, file)):
                     counter += 1
+
+            # Save the images
             try:
                 output_file = os.path.abspath(os.path.join(output_path, file))
-                if extension == 'png':
-                    img.save(output_file,
-                             pnginfo=metadata, optimize=True)
-                elif extension == 'webp':
-                    img.save(output_file, quality=quality)
-                elif extension in ["jpg", "jpeg"]:
+                if extension in ["jpg", "jpeg"]:
                     img.save(output_file,
                              quality=quality, optimize=True)
+                elif extension == 'webp':
+                    img.save(output_file, 
+                             quality=quality, lossless=lossless_webp, exif=exif_data)
+                elif extension == 'png':
+                    img.save(output_file, 
+                             pnginfo=exif_data, optimize=True)
+                elif extension == 'bmp':
+                    img.save(output_file)
                 elif extension == 'tiff':
                     img.save(output_file,
                              quality=quality, optimize=True)
-                elif extension == 'webp':
-                    img.save(output_file, quality=quality, 
-                                lossless=lossless_webp, exif=metadata)
-                elif extension == 'bmp':
-                    img.save(output_file)
+                else:
+                    img.save(output_file, 
+                             pnginfo=exif_data, optimize=True)
                 
                 cstr(f"Image file saved to: {output_file}").msg.print()
                 
@@ -7159,7 +7292,6 @@ class WAS_Image_Save:
             return {"ui": {"images": results}}
         else:
             return {"ui": {"images": []}}
-            
 
     def get_subfolder_path(self, image_path, output_path):
         output_parts = output_path.strip(os.sep).split(os.sep)
@@ -7214,8 +7346,9 @@ class WAS_Load_Image:
         # Update history
         update_history_images(image_path)
 
+        image = i
         if not RGBA:
-            image = i.convert('RGB')
+            image = image.convert('RGB')
         image = np.array(image).astype(np.float32) / 255.0
         image = torch.from_numpy(image)[None,]
 
@@ -10589,7 +10722,6 @@ class WAS_BLIP_Model_Loader:
     
         if ( 'timm' not in packages() 
             or 'transformers' not in packages() 
-            or 'GitPython' not in packages()
             or 'fairscale' not in packages() ):
             cstr(f"Modules or packages are missing to use BLIP models. Please run the `{os.path.join(WAS_SUITE_ROOT, 'requirements.txt')}` through ComfyUI's ptyhon executable.").error.print()
             exit
@@ -10598,24 +10730,13 @@ class WAS_BLIP_Model_Loader:
             cstr(f"`transformers==4.26.1` is required for BLIP models. Please run the `{os.path.join(WAS_SUITE_ROOT, 'requirements.txt')}` through ComfyUI's ptyhon executable.").error.print()
             exit
             
-        blip_dir = os.path.join(WAS_SUITE_ROOT, 'repos'+os.sep+'BLIP')
-        if blip_dir not in sys.path:
-            sys.path.append(blip_dir)
-
-        if not os.path.exists(blip_dir):
-            from git.repo.base import Repo
-            cstr("Installing BLIP...").msg.print()
-            Repo.clone_from('https://github.com/WASasquatch/BLIP-Python', os.path.join(WAS_SUITE_ROOT, 'repos'+os.sep+'BLIP'))
-            
-        sys.path.append(blip_dir)
-            
         device = 'cpu'
         conf = getSuiteConfig()
         size = 384
             
         if blip_model == 'caption':
 
-            from models.blip import blip_decoder
+            from .modules.BLIP.blip_module import blip_decoder
             
             blip_dir = os.path.join(MODELS_DIR, 'blip')
             if not os.path.exists(blip_dir):
@@ -10634,7 +10755,7 @@ class WAS_BLIP_Model_Loader:
             
         elif blip_model == 'interrogate':
         
-            from models.blip_vqa import blip_vqa
+            from .modules.BLIP.blip_module import blip_vqa
             
             blip_dir = os.path.join(MODELS_DIR, 'blip')
             if not os.path.exists(blip_dir):
@@ -10694,10 +10815,6 @@ class WAS_BLIP_Analyze_Image:
             image = transform(raw_image).unsqueeze(0).to(device)   
             return image.view(1, -1, image_size, image_size)  # Change the shape of the output tensor       
         
-        blip_dir = os.path.join(WAS_SUITE_ROOT, 'repos'+os.sep+'BLIP')
-        if blip_dir not in sys.path:
-            sys.path.append(blip_dir)
-        
         from torchvision import transforms
         from torchvision.transforms.functional import InterpolationMode
         
@@ -10716,7 +10833,7 @@ class WAS_BLIP_Analyze_Image:
             if blip_model:
                 model = blip_model[0].to(device)
             else:
-                from models.blip import blip_decoder
+                from .modules.BLIP.blip_module import blip_decoder
                 
                 blip_dir = os.path.join(MODELS_DIR, 'blip')
                 if not os.path.exists(blip_dir):
@@ -10745,7 +10862,7 @@ class WAS_BLIP_Analyze_Image:
             if blip_model:
                 model = blip_model[0].to(device)
             else:
-                from models.blip_vqa import blip_vqa
+                from .modules.BLIP.blip_module import blip_vqa
                 
                 blip_dir = os.path.join(MODELS_DIR, 'blip')
                 if not os.path.exists(blip_dir):
@@ -11159,11 +11276,11 @@ class WAS_Image_Bounds:
     CATEGORY = "WAS Suite/Image/Bound"
     
     def image_bounds(self, image):
-        _, height, width, _ = image.shape
-        
-        image_bounds = [0, height - 1, 0, width - 1]
-        
-        return (image_bounds,)
+        if len(image.shape) == 4:
+            bounds = [(0, img.shape[1] - 1, 0, img.shape[2] - 1) for img in image]
+        else:
+            bounds = [(0, image.shape[0] - 1, 0, image.shape[1] - 1)]
+        return (bounds,)
 
 
 # INSET IMAGE BOUNDS
@@ -11189,23 +11306,14 @@ class WAS_Inset_Image_Bounds:
     CATEGORY = "WAS Suite/Image/Bound"
     
     def inset_image_bounds(self, image_bounds, inset_left, inset_right, inset_top, inset_bottom):
-        # Unpack the image bounds
-        rmin, rmax, cmin, cmax = image_bounds
-        
-        # Apply insets
-        rmin = rmin + inset_top
-        rmax = rmax - inset_bottom
-        cmin = cmin + inset_left
-        cmax = cmax - inset_right
-
-        # Check if the resulting bounds are valid
-        if rmin > rmax or cmin > cmax:
-            cstr("Invalid insets provided. Please make sure the insets do not exceed the image bounds.").error.print()
-            return
-        
-        image_bounds = [rmin, rmax, cmin, cmax]
-        
-        return (image_bounds,)
+        inset_bounds = []
+        for rmin, rmax, cmin, cmax in image_bounds:
+            rmin += inset_top
+            rmax -= inset_bottom
+            cmin += inset_left
+            cmax -= inset_right
+            inset_bounds.append((rmin, rmax, cmin, cmax))
+        return (inset_bounds,)
 
 
 # WAS BOUNDED IMAGE BLEND
@@ -11305,15 +11413,11 @@ class WAS_Bounded_Image_Crop:
     CATEGORY = "WAS Suite/Image/Bound"
     
     def bounded_image_crop(self, image, image_bounds):
-        # Unpack the image bounds
-        rmin, rmax, cmin, cmax = image_bounds
-
-        # Check if the provided bounds are valid
-        if rmin > rmax or cmin > cmax:
-            cstr("Invalid bounds provided. Please make sure the bounds are within the image dimensions.").error.print()
-
-        # Crop the image using the provided bounds and return it
-        return (image[:, rmin:rmax+1, cmin:cmax+1, :],)
+        cropped_images = []
+        for rmin, rmax, cmin, cmax in image_bounds:
+            cropped_image = image[:, rmin:rmax + 1, cmin:cmax + 1, :]
+            cropped_images.append(cropped_image)
+        return (torch.cat(cropped_images, dim=0),)
 
 
 # WAS BOUNDED IMAGE BLEND WITH MASK
@@ -11340,45 +11444,20 @@ class WAS_Bounded_Image_Blend_With_Mask:
     CATEGORY = "WAS Suite/Image/Bound"
     
     def bounded_image_blend_with_mask(self, target, target_mask, target_bounds, source, blend_factor, feathering):
-        # Convert PyTorch tensors to PIL images
         target_pil = Image.fromarray((target.squeeze(0).cpu().numpy() * 255).clip(0, 255).astype(np.uint8))
         target_mask_pil = Image.fromarray((target_mask.cpu().numpy() * 255).astype(np.uint8), mode='L')
-        source_pils = []
-        if source.ndim > 3:
-            for source_img in source:
-                source_pils.append(Image.fromarray((source_img.squeeze(0).cpu().numpy() * 255).astype(np.uint8)))
-        else:
-            source_pils.append(Image.fromarray((source.squeeze(0).cpu().numpy() * 255).astype(np.uint8)))
-
-        # Extract the target bounds
+        source_pil = Image.fromarray((source.squeeze(0).cpu().numpy() * 255).astype(np.uint8))
         rmin, rmax, cmin, cmax = target_bounds
-
-        result_tensors = []
-        for source_pil in source_pils:
-            # Create a blank image with the same size and mode as the target
-            source_positioned = Image.new(target_pil.mode, target_pil.size)
-
-            # Paste the source image onto the blank image using the target bounds
-            source_positioned.paste(source_pil, (cmin, rmin))
-
-            # Create a blend mask using the target mask and blend factor
-            blend_mask = target_mask_pil.point(lambda p: p * blend_factor).convert('L')
-
-            # Apply feathering (Gaussian blur) to the blend mask if feather_amount is greater than 0
-            if feathering > 0:
-                blend_mask = blend_mask.filter(ImageFilter.GaussianBlur(radius=feathering))
-
-            # Blend the source and target images using the blend mask
-            result = Image.composite(source_positioned, target_pil, blend_mask)
-
-            # Convert the result back to a PyTorch tensor
-            result_tensors.append(torch.from_numpy(np.array(result).astype(np.float32) / 255).unsqueeze(0))
-
-        result_tensor = torch.cat(result_tensors, dim=0)
+        source_positioned = Image.new(target_pil.mode, target_pil.size)
+        source_positioned.paste(source_pil, (cmin, rmin))
+        blend_mask = target_mask_pil.point(lambda p: p * blend_factor).convert('L')
+        if feathering > 0:
+            blend_mask = blend_mask.filter(ImageFilter.GaussianBlur(radius=feathering))
+        result = Image.composite(source_positioned, target_pil, blend_mask)
+        result_tensor = torch.from_numpy(np.array(result).astype(np.float32) / 255).unsqueeze(0)
+        
         return (result_tensor,)
 
-
-# WAS BOUNDED IMAGE CROP WITH MASK
 class WAS_Bounded_Image_Crop_With_Mask:
     def __init__(self):
         pass
@@ -11402,26 +11481,36 @@ class WAS_Bounded_Image_Crop_With_Mask:
     CATEGORY = "WAS Suite/Image/Bound"
     
     def bounded_image_crop_with_mask(self, image, mask, padding_left, padding_right, padding_top, padding_bottom):
-        # Get the bounding box coordinates of the mask
-        rows = torch.any(mask, axis=1)
-        cols = torch.any(mask, axis=0)
+        is_batch = len(mask.shape) == 3
+        if is_batch:
+            cropped_images = []
+            all_bounds = []
+            for i in range(mask.shape[0]):
+                single_mask = mask[i]
+                single_image, bounds = self._crop_single_image(image, single_mask, padding_left, padding_right, padding_top, padding_bottom)
+                cropped_images.append(single_image)
+                all_bounds.append(bounds)
+            return torch.stack(cropped_images), all_bounds
+        else:
+            single_image, bounds = self._crop_single_image(image, mask, padding_left, padding_right, padding_top, padding_bottom)
+            return single_image, bounds
+
+    def _crop_single_image(self, image, mask, padding_left, padding_right, padding_top, padding_bottom):
+        rows = torch.any(mask, dim=1)
+        cols = torch.any(mask, dim=0)
         rmin, rmax = torch.where(rows)[0][[0, -1]]
         cmin, cmax = torch.where(cols)[0][[0, -1]]
-        
-        # Apply padding
+
         rmin = max(rmin - padding_top, 0)
         rmax = min(rmax + padding_bottom, mask.shape[0] - 1)
         cmin = max(cmin - padding_left, 0)
         cmax = min(cmax + padding_right, mask.shape[1] - 1)
         
         bounds = [rmin, rmax, cmin, cmax]
-        
-        # Crop the image using the computed coordinates and return it
-        return (image[:, rmin:rmax+1, cmin:cmax+1, :], bounds,)
-
+        return image[:, rmin:rmax+1, cmin:cmax+1, :], bounds
+    
 
 #! NUMBERS
-
 
 # RANDOM NUMBER
 
@@ -13203,6 +13292,7 @@ NODE_CLASS_MAPPINGS = {
     "Conditioning Input Switch": WAS_Conditioning_Input_Switch,
     "Constant Number": WAS_Constant_Number,
     "Create Grid Image": WAS_Image_Grid_Image,
+    "Create Grid Image from Batch": WAS_Image_Grid_Image_Batch,
     "Create Morph Image": WAS_Image_Morph_GIF, 
     "Create Morph Image from Path": WAS_Image_Morph_GIF_By_Path,
     "Create Video from Path": WAS_Create_Video_From_Path,
@@ -13344,8 +13434,6 @@ NODE_CLASS_MAPPINGS = {
     "SAM Parameters": WAS_SAM_Parameters,
     "SAM Parameters Combine": WAS_SAM_Combine_Parameters,
     "SAM Image Mask": WAS_SAM_Image_Mask,
-    #"LangSAM Model Loader": WAS_Lang_SAM_Model_Loader,
-    #"LangSAM Masking": WAS_Lang_SAM_Masking,
     "Samples Passthrough (Stat System)": WAS_Samples_Passthrough_Stat_System,
     "String to Text": WAS_String_To_Text,
     "Image Bounds": WAS_Image_Bounds,
