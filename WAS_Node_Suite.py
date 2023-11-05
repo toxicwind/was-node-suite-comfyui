@@ -835,8 +835,8 @@ class TextTokens:
         if not self.WDB.getDB().__contains__('custom_tokens'):
             self.WDB.insertCat('custom_tokens')
         self.custom_tokens = self.WDB.getDict('custom_tokens')
-                
-        self.tokens =  {
+        
+        self.tokens = {
             '[time]': str(time.time()).replace('.','_'),
             '[hostname]': socket.gethostname(),
         }
@@ -845,24 +845,23 @@ class TextTokens:
             self.tokens['[time]'] = self.tokens['[time]'].split('.')[0]
 
         try:
-            self.tokens['[user]'] = ( os.getlogin() if os.getlogin() else 'null' )
+            self.tokens['[user]'] = os.getlogin() if os.getlogin() else 'null'
         except Exception:
             self.tokens['[user]'] = 'null'
-                
+
     def addToken(self, name, value):
         self.custom_tokens.update({name: value})
         self._update()
-                
-    def removeToken (self, name):
+
+    def removeToken(self, name):
         self.custom_tokens.pop(name)
         self._update()
-        
+
     def format_time(self, format_code):
         return time.strftime(format_code, time.localtime(time.time()))
-        
+
     def parseTokens(self, text):
         tokens = self.tokens.copy()
-
         if self.custom_tokens:
             tokens.update(self.custom_tokens)
 
@@ -874,7 +873,8 @@ class TextTokens:
         for token, value in tokens.items():
             if token.startswith('[time('):
                 continue
-            text = text.replace(token, value)
+            pattern = re.compile(r'\b' + re.escape(token) + r'\b')
+            text = pattern.sub(value, text)
 
         def replace_custom_time(match):
             format_code = match.group(1)
@@ -883,7 +883,7 @@ class TextTokens:
         text = re.sub(r'\[time\((.*?)\)\]', replace_custom_time, text)
 
         return text
-                
+
     def _update(self):
         self.WDB.updateCat('custom_tokens', self.custom_tokens)
         
@@ -5124,7 +5124,7 @@ class WAS_Load_Image_Batch:
             self.label = label
 
         def load_images(self, directory_path, pattern):
-            for file_name in glob.glob(os.path.join(directory_path, pattern), recursive=True):
+            for file_name in glob.glob(os.path.join(glob.escape(directory_path), pattern), recursive=True):
                 if file_name.lower().endswith(ALLOWED_EXT):
                     abs_file_path = os.path.abspath(file_name)
                     self.image_paths.append(abs_file_path)
@@ -5924,43 +5924,31 @@ class WAS_Image_High_Pass_Filter:
     CATEGORY = "WAS Suite/Image/Filter"
 
     def high_pass(self, images, radius=10, strength=1.5, color_output="true", neutral_background="true"):
-    
         batch_tensor = []
         for image in images:
-            batch_tensor.append(pil2tensor(self.apply_hpf(tensor2pil(image), radius, strength, color_output, neutral_background)))
+            transformed_image = self.apply_hpf(tensor2pil(image), radius, strength, color_output, neutral_background)
+            batch_tensor.append(pil2tensor(transformed_image))
         batch_tensor = torch.cat(batch_tensor, dim=0)
-        
         return (batch_tensor, )
 
     def apply_hpf(self, img, radius=10, strength=1.5, color_output="true", neutral_background="true"):
-        # PIL to numpy
         img_arr = np.array(img).astype('float')
-
-        # Apply a Gaussian blur with the given radius
-        blurred_arr = np.array(img.filter(
-            ImageFilter.GaussianBlur(radius=radius))).astype('float')
-
-        # Apply the High Pass Filter
+        blurred_arr = np.array(img.filter(ImageFilter.GaussianBlur(radius=radius))).astype('float')
         hpf_arr = img_arr - blurred_arr
         hpf_arr = np.clip(hpf_arr * strength, 0, 255).astype('uint8')
 
         if color_output == "true":
-            # Create a color high pass image by applying the HPF to each channel separately
-            r = Image.fromarray(hpf_arr[:, :, 0], mode='L')
-            g = Image.fromarray(hpf_arr[:, :, 1], mode='L')
-            b = Image.fromarray(hpf_arr[:, :, 2], mode='L')
-            high_pass = Image.merge('RGB', (r, g, b))
+            high_pass = Image.fromarray(hpf_arr, mode='RGB')
         else:
-            # Create a grayscale high pass image by converting the filtered array to mode 'L'
-            high_pass = Image.fromarray(hpf_arr, mode='L')
+            grayscale_arr = np.mean(hpf_arr, axis=2).astype('uint8')
+            high_pass = Image.fromarray(grayscale_arr, mode='L')
 
         if neutral_background == "true":
-            # Apply neutral background
-            neutral_bg = Image.new("RGB", high_pass.size, (128, 128, 128))
+            neutral_color = (128, 128, 128) if high_pass.mode == 'RGB' else 128
+            neutral_bg = Image.new(high_pass.mode, high_pass.size, neutral_color)
             high_pass = ImageChops.screen(neutral_bg, high_pass)
 
-        # Return the high pass image
-        return high_pass
+        return high_pass.convert("RGB")
 
 
 # IMAGE LEVELS NODE
@@ -7527,6 +7515,11 @@ class WAS_Mask_To_Image:
             tensor = masks.permute(0, 2, 3, 1)
             tensor_rgb = torch.cat([tensor] * 3, dim=-1)
             return (tensor_rgb,)
+        elif masks.ndim == 3:
+            # If Input has shape [N, H, W]
+            tensor = masks.unsqueeze(-1)
+            tensor_rgb = torch.cat([tensor] * 3, dim=-1)
+            return (tensor_rgb, )
         elif masks.ndim == 2:
             # If input has shape [H, W]
             tensor = masks.unsqueeze(0).unsqueeze(-1)
@@ -9461,6 +9454,7 @@ class WAS_Text_List_Concatenate:
             "required": {
                 "list_a": ("LIST", {"forceInput": True}),
                 "list_b": ("LIST", {"forceInput": True}),
+                "delimiter": ("STRING", {"forceInput": True}),
             },
             "optional": {
                 "list_c": ("LIST", {"forceInput": True}),
@@ -9848,11 +9842,12 @@ class WAS_Text_Concatenate:
             "required": {
                 "text_a": (TEXT_TYPE, {"forceInput": (True if TEXT_TYPE == 'STRING' else False)}),
                 "text_b": (TEXT_TYPE, {"forceInput": (True if TEXT_TYPE == 'STRING' else False)}),
-                "linebreak_addition": (['false','true'], ),
+                "linebreak_addition": (['false', 'true'],),
             },
             "optional": {
                 "text_c": (TEXT_TYPE, {"forceInput": (True if TEXT_TYPE == 'STRING' else False)}),
                 "text_d": (TEXT_TYPE, {"forceInput": (True if TEXT_TYPE == 'STRING' else False)}),
+                "delimiter": ('STRING', {"forceInput": False}),
             }
         }
 
@@ -9861,13 +9856,26 @@ class WAS_Text_Concatenate:
 
     CATEGORY = "WAS Suite/Text"
 
-    def text_concatenate(self, text_a, text_b, text_c=None, text_d=None, linebreak_addition='false'):
-        return_text = text_a + ("\n" if linebreak_addition == 'true' else '') + text_b
+    def text_concatenate(self, text_a, text_b, text_c=None, text_d=None, linebreak_addition='false', delimiter=''):
+        # Initialize return_text with text_a
+        return_text = text_a
+
+        def append_text(base_text, new_text):
+            if linebreak_addition == 'true':
+                return base_text + "\n" + new_text
+            else:
+                return base_text + delimiter + new_text
+
+        return_text = append_text(return_text, text_b)
+
         if text_c:
-            return_text = return_text + ("\n" if linebreak_addition == 'true' else '') + text_c
+            return_text = append_text(return_text, text_c)
+
         if text_d:
-            return_text = return_text + ("\n" if linebreak_addition == 'true' else '') + text_d
+            return_text = append_text(return_text, text_d)
+
         return (return_text, )
+
 
 
 # Text Search and Replace
@@ -11256,8 +11264,10 @@ class WAS_SAM_Image_Mask:
         
         return (image, mask, )
 
+#! BOUNDED IMAGES
 
 # IMAGE BOUNDS
+
 class WAS_Image_Bounds:
     def __init__(self):
         pass
@@ -11276,14 +11286,13 @@ class WAS_Image_Bounds:
     CATEGORY = "WAS Suite/Image/Bound"
     
     def image_bounds(self, image):
-        if len(image.shape) == 4:
-            bounds = [(0, img.shape[1] - 1, 0, img.shape[2] - 1) for img in image]
-        else:
-            bounds = [(0, image.shape[0] - 1, 0, image.shape[1] - 1)]
-        return (bounds,)
+        # Ensure we are working with batches
+        image = image.unsqueeze(0) if image.dim() == 3 else image
 
+        return([(0, img.shape[0]-1 , 0, img.shape[1]-1) for img in image],)
 
 # INSET IMAGE BOUNDS
+
 class WAS_Inset_Image_Bounds:
     def __init__(self):
         pass
@@ -11312,11 +11321,15 @@ class WAS_Inset_Image_Bounds:
             rmax -= inset_bottom
             cmin += inset_left
             cmax -= inset_right
+
+            if rmin > rmax or cmin > cmax:
+                raise ValueError("Invalid insets provided. Please make sure the insets do not exceed the image bounds.")
+        
             inset_bounds.append((rmin, rmax, cmin, cmax))
         return (inset_bounds,)
 
+# BOUNDED IMAGE BLEND
 
-# WAS BOUNDED IMAGE BLEND
 class WAS_Bounded_Image_Blend:
     def __init__(self):
         pass
@@ -11339,61 +11352,74 @@ class WAS_Bounded_Image_Blend:
     CATEGORY = "WAS Suite/Image/Bound"
     
     def bounded_image_blend(self, target, target_bounds, source, blend_factor, feathering):
-        # Convert PyTorch tensors to PIL images
-        target_pil = Image.fromarray((target.squeeze(0).cpu().numpy() * 255).clip(0, 255).astype(np.uint8))
-        source_pils = []
-        if source.shape[0] > 1:
-            for source_img in source:
-                source_pils.append(Image.fromarray((source_img.squeeze(0).cpu().numpy() * 255).astype(np.uint8)))
-        else:
-            source_pils.append(Image.fromarray((source.squeeze(0).cpu().numpy() * 255).astype(np.uint8)))
+        # Ensure we are working with batches
+        target = target.unsqueeze(0) if target.dim() == 3 else target
+        source = source.unsqueeze(0) if source.dim() == 3 else source
 
-        # Extract the target bounds
-        rmin, rmax, cmin, cmax = target_bounds
+        # If number of target images and source images don't match then all source images
+        # will be applied only to the first target image, otherwise they will be applied 
+        # 1 to 1
+        # If the number of target bounds and source images don't match then all sourcess will
+        # use the first target bounds for scaling and placing the source images, otherwise they
+        # will be applied 1 to 1
+        tgt_len = 1 if len(target) != len(source) else len(source)
+        bounds_len = 1 if len(target_bounds) != len(source) else len(source)
 
-        # Calculate the dimensions of the target bounds
-        width = cmax - cmin + 1
-        height = rmax - rmin + 1
+        # Convert target PyTorch tensors to PIL images
+        tgt_arr = [tensor2pil(tgt) for tgt in target[:tgt_len]]
+        src_arr = [tensor2pil(src) for src in source]
 
         result_tensors = []
-        for source_pil in source_pils:
+        for idx in range(len(src_arr)):
+            src = src_arr[idx]
+            # If only one target image, then ensure it is the only one used
+            if (tgt_len == 1 and idx == 0) or tgt_len > 1:
+                tgt = tgt_arr[idx]
+
+            # If only one bounds object, no need to extract and calculate more than once.
+            #   Additionally, if only one bounds obuect, then the mask only needs created once
+            if (bounds_len == 1 and idx == 0) or bounds_len > 1:
+                # Extract the target bounds
+                rmin, rmax, cmin, cmax = target_bounds[idx]
+
+                # Calculate the dimensions of the target bounds
+                height, width = (rmax - rmin + 1, cmax - cmin + 1)
+
+                # Create the feathered mask portion the size of the target bounds
+                if feathering > 0:
+                    inner_mask = Image.new('L', (width - (2 * feathering), height - (2 * feathering)), 255)
+                    inner_mask = ImageOps.expand(inner_mask, border=feathering, fill=0)
+                    inner_mask = inner_mask.filter(ImageFilter.GaussianBlur(radius=feathering))
+                else:
+                    inner_mask = Image.new('L', (width, height), 255) 
+
+                # Create a blend mask using the inner_mask and blend factor
+                inner_mask = inner_mask.point(lambda p: p * blend_factor)
+
+                # Create the blend mask with the same size as the target image
+                tgt_mask = Image.new('L', tgt.size, 0)
+                # Paste the feathered mask portion into the blend mask at the target bounds position
+                tgt_mask.paste(inner_mask, (cmin, rmin))
+
             # Resize the source image to match the dimensions of the target bounds
-            source_resized = source_pil.resize((width, height), Image.ANTIALIAS)
-
-            # Create the blend mask with the same size as the target image
-            blend_mask = Image.new('L', target_pil.size, 0)
-
-            # Create the feathered mask portion the size of the target bounds
-            if feathering > 0:
-                inner_mask = Image.new('L', (width - (2 * feathering), height - (2 * feathering)), 255)
-                inner_mask = ImageOps.expand(inner_mask, border=feathering, fill=0)
-                inner_mask = inner_mask.filter(ImageFilter.GaussianBlur(radius=feathering))
-            else:
-                inner_mask = Image.new('L', (width, height), 255)
-
-            # Paste the feathered mask portion into the blend mask at the target bounds position
-            blend_mask.paste(inner_mask, (cmin, rmin))
+            src_resized = src.resize((width, height), Image.Resampling.LANCZOS)
 
             # Create a blank image with the same size and mode as the target
-            source_positioned = Image.new(target_pil.mode, target_pil.size)
+            src_positioned = Image.new(tgt.mode, tgt.size)
 
             # Paste the source image onto the blank image using the target bounds
-            source_positioned.paste(source_resized, (cmin, rmin))
-
-            # Create a blend mask using the blend_mask and blend factor
-            blend_mask = blend_mask.point(lambda p: p * blend_factor).convert('L')
+            src_positioned.paste(src_resized, (cmin, rmin))
 
             # Blend the source and target images using the blend mask
-            result = Image.composite(source_positioned, target_pil, blend_mask)
+            result = Image.composite(src_positioned, tgt, tgt_mask)
 
             # Convert the result back to a PyTorch tensor
-            result_tensors.append(torch.from_numpy(np.array(result).astype(np.float32) / 255).unsqueeze(0))
+            result_tensors.append(pil2tensor(result))
 
-        result = torch.cat(result_tensors, dim=0)
-        return (result,)
-
+        return (torch.cat(result_tensors, dim=0),)
 
 # BOUNDED IMAGE CROP
+
 class WAS_Bounded_Image_Crop:
     def __init__(self):
         pass
@@ -11413,14 +11439,30 @@ class WAS_Bounded_Image_Crop:
     CATEGORY = "WAS Suite/Image/Bound"
     
     def bounded_image_crop(self, image, image_bounds):
+        # Ensure we are working with batches
+        image = image.unsqueeze(0) if image.dim() == 3 else image
+
+        # If number of images and bounds don't match, then only the first bounds will be used 
+        # to crop the images, otherwise, each bounds will be used for each image 1 to 1
+        bounds_len = 1 if len(image_bounds) != len(image) else len(image)
+
         cropped_images = []
-        for rmin, rmax, cmin, cmax in image_bounds:
-            cropped_image = image[:, rmin:rmax + 1, cmin:cmax + 1, :]
-            cropped_images.append(cropped_image)
-        return (torch.cat(cropped_images, dim=0),)
+        for idx in range(len(image)):
+            # If only one bounds object, no need to extract and calculate more than once.
+            if (bounds_len == 1 and idx == 0) or bounds_len > 1:
+                rmin, rmax, cmin, cmax = image_bounds[idx]
+
+                # Check if the provided bounds are valid
+                if rmin > rmax or cmin > cmax:
+                    raise ValueError("Invalid bounds provided. Please make sure the bounds are within the image dimensions.")
+
+            cropped_images.append(image[idx][rmin:rmax+1, cmin:cmax+1, :])
+
+        return (torch.stack(cropped_images, dim=0),)
 
 
-# WAS BOUNDED IMAGE BLEND WITH MASK
+# BOUNDED IMAGE BLEND WITH MASK
+
 class WAS_Bounded_Image_Blend_With_Mask:
     def __init__(self):
         pass
@@ -11444,19 +11486,90 @@ class WAS_Bounded_Image_Blend_With_Mask:
     CATEGORY = "WAS Suite/Image/Bound"
     
     def bounded_image_blend_with_mask(self, target, target_mask, target_bounds, source, blend_factor, feathering):
-        target_pil = Image.fromarray((target.squeeze(0).cpu().numpy() * 255).clip(0, 255).astype(np.uint8))
-        target_mask_pil = Image.fromarray((target_mask.cpu().numpy() * 255).astype(np.uint8), mode='L')
-        source_pil = Image.fromarray((source.squeeze(0).cpu().numpy() * 255).astype(np.uint8))
-        rmin, rmax, cmin, cmax = target_bounds
-        source_positioned = Image.new(target_pil.mode, target_pil.size)
-        source_positioned.paste(source_pil, (cmin, rmin))
-        blend_mask = target_mask_pil.point(lambda p: p * blend_factor).convert('L')
-        if feathering > 0:
-            blend_mask = blend_mask.filter(ImageFilter.GaussianBlur(radius=feathering))
-        result = Image.composite(source_positioned, target_pil, blend_mask)
-        result_tensor = torch.from_numpy(np.array(result).astype(np.float32) / 255).unsqueeze(0)
-        
-        return (result_tensor,)
+        # Ensure we are working with batches
+        target = target.unsqueeze(0) if target.dim() == 3 else target
+        source = source.unsqueeze(0) if source.dim() == 3 else source
+        target_mask = target_mask.unsqueeze(0) if target_mask.dim() == 2 else target_mask
+
+        # If number of target masks and source images don't match, then only the first mask will be used on 
+        # the source images, otherwise, each mask will be used for each source image 1 to 1
+        # Simarly, if the number of target images and source images don't match then
+        # all source images will be applied only to the first target, otherwise they will be applied 
+        # 1 to 1
+        tgt_mask_len = 1 if len(target_mask) != len(source) else len(source)
+        tgt_len = 1 if len(target) != len(source) else len(source)
+        bounds_len = 1 if len(target_bounds) != len(source) else len(source)
+
+        tgt_arr = [tensor2pil(tgt) for tgt in target[:tgt_len]]
+        src_arr = [tensor2pil(src) for src in source]
+        tgt_mask_arr=[]
+
+        # Convert Target Mask(s) to grayscale image format
+        for m_idx in range(tgt_mask_len):
+            np_array = np.clip((target_mask[m_idx].cpu().numpy().squeeze() * 255.0), 0, 255)
+            tgt_mask_arr.append(Image.fromarray((np_array).astype(np.uint8), mode='L'))
+
+        result_tensors = []
+        for idx in range(len(src_arr)):
+            src = src_arr[idx]
+            # If only one target image, then ensure it is the only one used
+            if (tgt_len == 1 and idx == 0) or tgt_len > 1:
+                tgt = tgt_arr[idx]
+
+            # If only one bounds, no need to extract and calculate more than once
+            if (bounds_len == 1 and idx == 0) or bounds_len > 1:
+                # Extract the target bounds
+                rmin, rmax, cmin, cmax = target_bounds[idx]
+
+                # Calculate the dimensions of the target bounds
+                height, width = (rmax - rmin + 1, cmax - cmin + 1)
+
+            # If only one mask, then ensure that is the only the first is used
+            if (tgt_mask_len == 1 and idx == 0) or tgt_mask_len > 1:
+                tgt_mask = tgt_mask_arr[idx]
+
+            # If only one mask and one bounds, then mask only needs to
+            #   be extended once because all targets will be the same size
+            if (tgt_mask_len == 1 and bounds_len == 1 and idx == 0) or \
+                (tgt_mask_len > 1 or bounds_len > 1):
+
+                # This is an imperfect, but easy way to determine if  the mask based on the
+                #   target image or source image. If not target, assume source. If neither, 
+                #   then it's not going to look right regardless
+                if (tgt_mask.size != tgt.size):
+                    # Create the blend mask with the same size as the target image
+                    mask_extended_canvas = Image.new('L', tgt.size, 0)
+
+                    # Paste the mask portion into the extended mask at the target bounds position
+                    mask_extended_canvas.paste(tgt_mask, (cmin, rmin))
+
+                    tgt_mask = mask_extended_canvas
+
+                # Apply feathering (Gaussian blur) to the blend mask if feather_amount is greater than 0
+                if feathering > 0:
+                    tgt_mask = tgt_mask.filter(ImageFilter.GaussianBlur(radius=feathering))
+                    
+                # Apply blending factor to the tgt mask now that it has been extended
+                tgt_mask = tgt_mask.point(lambda p: p * blend_factor)
+
+            # Resize the source image to match the dimensions of the target bounds
+            src_resized = src.resize((width, height), Image.Resampling.LANCZOS)
+
+            # Create a blank image with the same size and mode as the target
+            src_positioned = Image.new(tgt.mode, tgt.size)
+
+            # Paste the source image onto the blank image using the target
+            src_positioned.paste(src_resized, (cmin, rmin))
+
+            # Blend the source and target images using the blend mask
+            result = Image.composite(src_positioned, tgt, tgt_mask)
+
+            # Convert the result back to a PyTorch tensor            
+            result_tensors.append(pil2tensor(result))
+
+        return (torch.cat(result_tensors, dim=0),)
+
+# BOUNDED IMAGE CROP WITH MASK
 
 class WAS_Bounded_Image_Crop_With_Mask:
     def __init__(self):
@@ -11481,34 +11594,72 @@ class WAS_Bounded_Image_Crop_With_Mask:
     CATEGORY = "WAS Suite/Image/Bound"
     
     def bounded_image_crop_with_mask(self, image, mask, padding_left, padding_right, padding_top, padding_bottom):
-        is_batch = len(mask.shape) == 3
-        if is_batch:
-            cropped_images = []
-            all_bounds = []
-            for i in range(mask.shape[0]):
-                single_mask = mask[i]
-                single_image, bounds = self._crop_single_image(image, single_mask, padding_left, padding_right, padding_top, padding_bottom)
-                cropped_images.append(single_image)
-                all_bounds.append(bounds)
+        # Ensure we are working with batches
+        image = image.unsqueeze(0) if image.dim() == 3 else image
+        mask = mask.unsqueeze(0) if mask.dim() == 2 else mask
+
+        # If number of masks and images don't match, then only the first mask will be used on 
+        # the images, otherwise, each mask will be used for each image 1 to 1
+        mask_len = 1 if len(image) != len(mask) else len(image)
+
+        cropped_images = []
+        all_bounds = []
+        for i in range(len(image)):
+            # Single mask or multiple?
+            if (mask_len == 1 and i == 0) or mask_len > 0:
+                rows = torch.any(mask[i], dim=1)
+                cols = torch.any(mask[i], dim=0)
+                rmin, rmax = torch.where(rows)[0][[0, -1]]
+                cmin, cmax = torch.where(cols)[0][[0, -1]]
+
+                rmin = max(rmin - padding_top, 0)
+                rmax = min(rmax + padding_bottom, mask[i].shape[0] - 1)
+                cmin = max(cmin - padding_left, 0)
+                cmax = min(cmax + padding_right, mask[i].shape[1] - 1)
+
+            # Even if only a single mask, create a bounds for each cropped image
+            all_bounds.append([rmin, rmax, cmin, cmax])
+            cropped_images.append(image[i][rmin:rmax+1, cmin:cmax+1, :])
+  
             return torch.stack(cropped_images), all_bounds
-        else:
-            single_image, bounds = self._crop_single_image(image, mask, padding_left, padding_right, padding_top, padding_bottom)
-            return single_image, bounds
 
-    def _crop_single_image(self, image, mask, padding_left, padding_right, padding_top, padding_bottom):
-        rows = torch.any(mask, dim=1)
-        cols = torch.any(mask, dim=0)
-        rmin, rmax = torch.where(rows)[0][[0, -1]]
-        cmin, cmax = torch.where(cols)[0][[0, -1]]
+# DEBUG IMAGE BOUNDS TO CONSOLE
 
-        rmin = max(rmin - padding_top, 0)
-        rmax = min(rmax + padding_bottom, mask.shape[0] - 1)
-        cmin = max(cmin - padding_left, 0)
-        cmax = min(cmax + padding_right, mask.shape[1] - 1)
+class WAS_Image_Bounds_to_Console:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image_bounds": ("IMAGE_BOUNDS",),
+                "label": ("STRING", {"default": 'Debug to Console', "multiline": False}),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE_BOUNDS",)
+    OUTPUT_NODE = True
+    FUNCTION = "debug_to_console"
+
+    CATEGORY = "WAS Suite/Debug"
+
+    def debug_to_console(self, image_bounds, label):
+        label_out = 'Debug to Console'
+        if label.strip() == '':
+            lable_out = label
+
+        bounds_out = 'Empty'
+        if len(bounds_out) > 0:
+            bounds_out = ', \n    '.join('\t(rmin={}, rmax={}, cmin={}, cmax={})'
+                                     .format(a, b, c, d) for a, b, c, d in image_bounds) 
+
+        cstr(f'\033[33m{label_out}\033[0m:\n[\n{bounds_out}\n]\n').msg.print()
+        return (image_bounds, )
         
-        bounds = [rmin, rmax, cmin, cmax]
-        return image[:, rmin:rmax+1, cmin:cmax+1, :], bounds
-    
+    @classmethod
+    def IS_CHANGED(cls, **kwargs):
+        return float("NaN")
 
 #! NUMBERS
 
@@ -11551,7 +11702,7 @@ class WAS_Random_Number:
                 return
 
         # Return number
-        return (number, float(number), int(number))
+        return (number, float(number), round(number))
         
     @classmethod
     def IS_CHANGED(cls, seed, **kwargs):
@@ -11925,7 +12076,7 @@ class WAS_Boolean:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "boolean_number": ("INT", {"default":1, "min":0, "max":1, "step":1}),
+                "boolean_number": ("FLOAT", {"default":1, "min":0, "max":1, "step":1}),
             }
         }
 
@@ -13442,6 +13593,7 @@ NODE_CLASS_MAPPINGS = {
     "Bounded Image Blend with Mask": WAS_Bounded_Image_Blend_With_Mask,
     "Bounded Image Crop": WAS_Bounded_Image_Crop,
     "Bounded Image Crop with Mask": WAS_Bounded_Image_Crop_With_Mask,
+    "Image Bounds to Console": WAS_Image_Bounds_to_Console,
     "Text Dictionary Update": WAS_Dictionary_Update,
     "Text Add Tokens": WAS_Text_Add_Tokens,
     "Text Add Token by Input": WAS_Text_Add_Token_Input,
