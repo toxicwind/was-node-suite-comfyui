@@ -503,62 +503,46 @@ def nsp_parse(text, seed=0, noodle_key='__', nspterminology=None, pantry_path=No
 
     return new_text
     
-# Simple wildcard parser:
+
+import os
+import re
+import random
+import chardet
 
 def replace_wildcards(text, seed=None, noodle_key='__'):
-
-    def replace_nested(text, key_path_dict):
-        if re.findall(f"{noodle_key}(.+?){noodle_key}", text):
-            for key, file_path in key_path_dict.items():
-                with open(file_path, "r", encoding="utf-8") as file:
-                    lines = file.readlines()
-                    if lines:
-                        random_line = None
-                        while not random_line:
-                            line = random.choice(lines).strip()
-                            if not line.startswith('#') and not line.startswith('//'):
-                                random_line = line
-                        text = text.replace(key, random_line)
-        return text
-
-    conf = getSuiteConfig()
-    wildcard_dir = os.path.join(WAS_SUITE_ROOT, 'wildcards')
-    if not os.path.exists(wildcard_dir):
-        os.makedirs(wildcard_dir, exist_ok=True)
-    if conf.__contains__('wildcards_path'):
-        if conf['wildcards_path'] not in [None, ""]:
-            wildcard_dir = conf['wildcards_path']
-        
-    cstr(f"Wildcard Path: {wildcard_dir}").msg.print()
-
     # Set the random seed for reproducibility
-    if seed:
+    if seed is not None:
         random.seed(seed)
 
-    # Create a dictionary of key to file path pairs
-    key_path_dict = {}
-    for root, dirs, files in os.walk(wildcard_dir):
-        for file in files:
-            file_path = os.path.join(root, file)
-            key = os.path.relpath(file_path, wildcard_dir).replace(os.path.sep, "/").rsplit(".", 1)[0]
-            key_path_dict[f"{noodle_key}{key}{noodle_key}"] = os.path.abspath(file_path)
-            
-    # Replace keys in text with random lines from corresponding files
-    for key, file_path in key_path_dict.items():
-        with open(file_path, "r", encoding="utf-8") as file:
-            lines = file.readlines()
-            if lines:
-                random_line = None
-                while not random_line:
-                    line = random.choice(lines).strip()
-                    if not line.startswith('#') and not line.startswith('//'):
-                        random_line = line
-                text = text.replace(key, random_line)
-                
-    # Replace sub-wildacrds in result
-    text = replace_nested(text, key_path_dict)
+    # Function to detect file encoding
+    def detect_encoding(file_path):
+        with open(file_path, 'rb') as file:
+            return chardet.detect(file.read())['encoding']
 
-    return text
+    # Generator to yield lines from a file in random order
+    def random_line_generator(file_path, encoding):
+        with open(file_path, "r", encoding=encoding) as file:
+            lines = [line.strip() for line in file if line.strip() and not line.startswith(('#', '//'))]
+            while lines:
+                yield lines.pop(random.randrange(len(lines)))
+
+    # Function to replace keys in the text with random lines from files
+    def replace_keys(text, key_path_dict):
+        for key, file_path in key_path_dict.items():
+            encoding = detect_encoding(file_path)
+            line_gen = random_line_generator(file_path, encoding)
+            text = text.replace(key, next(line_gen, ''))
+        return text
+
+    # Construct key-path dictionary and replace wildcards
+    wildcard_dir = os.getenv('WAS_SUITE_ROOT', '') + '/wildcards'
+    os.makedirs(wildcard_dir, exist_ok=True)
+    key_path_dict = {
+        f"{noodle_key}{os.path.splitext(file)[0]}{noodle_key}": os.path.join(root, file)
+        for root, _, files in os.walk(wildcard_dir) for file in files
+    }
+
+    return replace_keys(text, key_path_dict)
     
 # Parse Prompt Variables
     
