@@ -502,8 +502,8 @@ def nsp_parse(text, seed=0, noodle_key='__', nspterminology=None, pantry_path=No
             random.seed(seed)
 
     return new_text
-    
 
+# Advanced wildcard parser:
 import os
 import re
 import random
@@ -543,7 +543,6 @@ def replace_wildcards(text, seed=None, noodle_key='__'):
     }
 
     return replace_keys(text, key_path_dict)
-    
 # Parse Prompt Variables
     
 def parse_prompt_vars(input_string, optional_vars=None):
