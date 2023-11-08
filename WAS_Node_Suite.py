@@ -509,40 +509,49 @@ import re
 import random
 import chardet
 
+def get_file_encoding(file_path):
+    with open(file_path, 'rb') as file:
+        return chardet.detect(file.read())['encoding']
+
+def read_file_lines(file_path, encoding):
+    try:
+        with open(file_path, 'r', encoding=encoding, errors='ignore') as file:
+            return [line.strip() for line in file if line.strip() and not line.startswith(('#', '//'))]
+    except Exception as e:
+        cstr(f"Error reading '{file_path}': {e}").msg.print()
+        return []
+
 def replace_wildcards(text, seed=None, noodle_key='__'):
-    # Set the random seed for reproducibility
-    if seed is not None:
+    conf = getSuiteConfig()
+    wildcard_dir = conf.get('wildcards_path', os.path.join(WAS_SUITE_ROOT, 'wildcards'))
+    os.makedirs(wildcard_dir, exist_ok=True)
+
+    if seed:
         random.seed(seed)
 
-    # Function to detect file encoding
-    def detect_encoding(file_path):
-        with open(file_path, 'rb') as file:
-            return chardet.detect(file.read())['encoding']
-
-    # Generator to yield lines from a file in random order
-    def random_line_generator(file_path, encoding):
-        with open(file_path, "r", encoding=encoding) as file:
-            lines = [line.strip() for line in file if line.strip() and not line.startswith(('#', '//'))]
-            while lines:
-                yield lines.pop(random.randrange(len(lines)))
-
-    # Function to replace keys in the text with random lines from files
-    def replace_keys(text, key_path_dict):
-        for key, file_path in key_path_dict.items():
-            encoding = detect_encoding(file_path)
-            line_gen = random_line_generator(file_path, encoding)
-            text = text.replace(key, next(line_gen, ''))
-        return text
-
-    # Construct key-path dictionary and replace wildcards
-    wildcard_dir = os.getenv('WAS_SUITE_ROOT', '') + '/wildcards'
-    os.makedirs(wildcard_dir, exist_ok=True)
     key_path_dict = {
-        f"{noodle_key}{os.path.splitext(file)[0]}{noodle_key}": os.path.join(root, file)
+        f"{noodle_key}{os.path.relpath(os.path.join(root, file), wildcard_dir).replace(os.path.sep, '/').rsplit('.', 1)[0]}{noodle_key}": os.path.abspath(os.path.join(root, file))
         for root, _, files in os.walk(wildcard_dir) for file in files
     }
 
-    return replace_keys(text, key_path_dict)
+    pattern = re.compile('|'.join(map(re.escape, key_path_dict.keys())))
+
+    def replace(match):
+        key = match.group(0)
+        file_path = key_path_dict[key]
+        encoding = get_file_encoding(file_path)
+        lines = read_file_lines(file_path, encoding)
+        if lines:
+            selected_line = random.choice(lines)
+            cstr(f"Selected '{selected_line}' from '{file_path}'").msg.print()
+            return selected_line
+        else:
+            cstr(f"No valid lines found in '{file_path}'").msg.print()
+            return ''
+
+    return pattern.sub(replace, text)
+
+
 # Parse Prompt Variables
     
 def parse_prompt_vars(input_string, optional_vars=None):
