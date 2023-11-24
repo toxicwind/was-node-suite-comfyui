@@ -549,7 +549,7 @@ def replace_wildcards(text, seed=None, noodle_key='__'):
             cstr(f"No valid lines found in '{file_path}'").msg.print()
             return ''
 
-    return pattern.sub(replace, text)
+    return pattern.sub(replace, text).strip()
 
 
 # Parse Prompt Variables
