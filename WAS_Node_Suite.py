@@ -37,6 +37,7 @@ import numpy as np
 from numba import jit
 import os
 import random
+from random import SystemRandom
 import re
 import requests
 import socket
@@ -505,38 +506,61 @@ def nsp_parse(text, seed=0, noodle_key='__', nspterminology=None, pantry_path=No
             random.seed(seed)
 
     return new_text
+    
+# Advanced wildcard parser:
+import os
+import hashlib
+import cupy as cp
+import numpy as np
+import mmap
+import struct
+
+def custom_seed(seed_str):
+    # Generate a seed from a string using a hash function
+    seed_hash = int(hashlib.sha256(seed_str.encode('utf-8')).hexdigest(), 16)
+    seed_hash %= 2**64  # Ensure the value is within the range of a 64-bit integer
+    seed_hash_bytes = struct.pack('Q', seed_hash)  # Convert to bytes
+    return int.from_bytes(seed_hash_bytes, byteorder='big')  # Convert bytes to an integer
 
 # Simple wildcard parser:
 
 def replace_wildcards(text, seed=None, noodle_key='__'):
+    def get_random_line(file_path, seed, key):
+        with open(file_path, "rb") as f:
+            mmapped_file = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+            lines = mmapped_file.read().split(b'\n')
+            line_count = len(lines)
 
-    def replace_nested(text, key_path_dict):
-        if re.findall(f"{noodle_key}(.+?){noodle_key}", text):
-            for key, file_path in key_path_dict.items():
-                with open(file_path, "r", encoding="utf-8") as file:
-                    lines = file.readlines()
-                    if lines:
-                        random_line = None
-                        while not random_line:
-                            line = random.choice(lines).strip()
-                            if not line.startswith('#') and not line.startswith('//'):
-                                random_line = line
-                        text = text.replace(key, random_line)
-        return text
+        if seed is not None:
+            custom_seed_value = custom_seed(str(seed) + key)
+            cp.random.seed(custom_seed_value)
+            
+            rand_index = int(cp.random.randint(0, line_count).tolist())
+        else:
+            rand_index = np.random.randint(0, line_count)
 
+        return lines[rand_index].decode('utf-8', 'replace').strip()
+
+    # Configuration and Initialization (Assuming getSuiteConfig and WAS_SUITE_ROOT are defined elsewhere)
     conf = getSuiteConfig()
+    # Default wildcard directory
     wildcard_dir = os.path.join(WAS_SUITE_ROOT, 'wildcards')
+    # Create the directory if it doesn't exist
     if not os.path.exists(wildcard_dir):
         os.makedirs(wildcard_dir, exist_ok=True)
     if conf.__contains__('wildcards_path'):
         if conf['wildcards_path'] not in [None, ""]:
             wildcard_dir = conf['wildcards_path']
 
+    # Check if a custom wildcards_path is provided in the configuration
+    if 'wildcards_path' in conf and conf['wildcards_path']:
+        wildcard_dir = conf['wildcards_path']
+
+    # Print the wildcard directory
     cstr(f"Wildcard Path: {wildcard_dir}").msg.print()
 
-    # Set the random seed for reproducibility
-    if seed:
-        random.seed(seed)
+    # Use the SystemRandom for better randomness
+    system_random = SystemRandom()
 
     # Create a dictionary of key to file path pairs
     key_path_dict = {}
@@ -547,6 +571,10 @@ def replace_wildcards(text, seed=None, noodle_key='__'):
             key_path_dict[f"{noodle_key}{key}{noodle_key}"] = os.path.abspath(file_path)
 
     # Replace keys in text with random lines from corresponding files
+            key = f"{noodle_key}{os.path.splitext(file)[0]}{noodle_key}"
+            key_path_dict[key] = os.path.abspath(file_path)
+
+    # Replace wildcards in text directly without caching
     for key, file_path in key_path_dict.items():
         with open(file_path, "r", encoding="utf-8") as file:
             lines = file.readlines()
@@ -560,8 +588,11 @@ def replace_wildcards(text, seed=None, noodle_key='__'):
 
     # Replace sub-wildacrds in result
     text = replace_nested(text, key_path_dict)
+        random_line = get_random_line(file_path, seed, key)
+        text = text.replace(key, random_line)
 
     return text
+
 
 # Parse Prompt Variables
 
