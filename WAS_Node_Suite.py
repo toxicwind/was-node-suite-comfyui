@@ -26,7 +26,7 @@ import comfy.utils
 import comfy.clip_vision
 import comfy.model_management
 import folder_paths as comfy_paths
-from comfy_extras.chainner_models import model_loading
+from spandrel import ModelLoader, ImageModelDescriptor
 import ast
 import glob
 import hashlib
@@ -4698,11 +4698,12 @@ class WAS_Image_Batch:
     CATEGORY = "WAS Suite/Image"
 
     def _check_image_dimensions(self, tensors, names):
-        reference_dimensions = tensors[0].shape[1:]  # Ignore batch dimension
-        mismatched_images = [names[i] for i, tensor in enumerate(tensors) if tensor.shape[1:] != reference_dimensions]
-
-        if mismatched_images:
-            raise ValueError(f"WAS Image Batch Warning: Input image dimensions do not match for images: {mismatched_images}")
+        dimensions = [tensor.shape for tensor in tensors]
+        if len(set(dimensions)) > 1:
+            mismatched_indices = [i for i, dim in enumerate(dimensions) if dim[1:] != dimensions[0][1:]]
+            mismatched_images = [names[i] for i in mismatched_indices]
+            if mismatched_images:
+                raise ValueError(f"WAS Image Batch Warning: Input image dimensions do not match for images: {mismatched_images}")
 
     def image_batch(self, **kwargs):
         batched_tensors = [kwargs[key] for key in kwargs if kwargs[key] is not None]
@@ -4714,55 +4715,6 @@ class WAS_Image_Batch:
         self._check_image_dimensions(batched_tensors, image_names)
         batched_tensors = torch.cat(batched_tensors, dim=0)
         return (batched_tensors,)
-    
-
-# Latent TO BATCH
-
-class WAS_Latent_Batch:
-    def __init__(self):
-        pass
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-            },
-            "optional": {
-                "latent_a": ("LATENT",),
-                "latent_b": ("LATENT",),
-                "latent_c": ("LATENT",),
-                "latent_d": ("LATENT",),
-            },
-        }
-
-    RETURN_TYPES = ("LATENT",)
-    RETURN_NAMES = ("latent",)
-    FUNCTION = "latent_batch"
-    CATEGORY = "WAS Suite/Latent"
-
-    def _check_latent_dimensions(self, tensors, names):
-        dimensions = [(tensor["samples"].shape) for tensor in tensors]
-        if len(set(dimensions)) > 1:
-            mismatched_indices = [i for i, dim in enumerate(dimensions) if dim[1] != dimensions[0][1]]
-            mismatched_latents = [names[i] for i in mismatched_indices]
-            if mismatched_latents:
-                raise ValueError(f"WAS latent Batch Warning: Input latent dimensions do not match for latents: {mismatched_latents}")
-
-    def latent_batch(self, **kwargs):
-        batched_tensors = [kwargs[key] for key in kwargs if kwargs[key] is not None]
-        latent_names = [key for key in kwargs if kwargs[key] is not None]
-
-        if not batched_tensors:
-            raise ValueError("At least one input latent must be provided.")
-
-        self._check_latent_dimensions(batched_tensors, latent_names)
-        samples_out = {}
-        samples_out["samples"]  = torch.cat([tensor["samples"] for tensor in batched_tensors], dim=0)
-        samples_out["batch_index"] = []
-        for tensor in batched_tensors:
-            cindex = tensor.get("batch_index", list(range(tensor["samples"].shape[0])))
-            samples_out["batch_index"] += cindex
-        return (samples_out,)
 
 
 # MASK TO BATCH
@@ -9725,94 +9677,6 @@ class WAS_Dictionary_Get:
         return (str(dictionary.get(key, default_value)), )
 
 
-# Text Dictionary New
-
-class WAS_Dictionary_New:
-    def __init__(self):
-        pass
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "key_1": ("STRING", {"default":"", "multiline": False}),
-                "value_1": ("STRING", {"default":"", "multiline": False}),
-            },
-            "optional": {
-                "key_2": ("STRING", {"default":"", "multiline": False}),
-                "value_2": ("STRING", {"default":"", "multiline": False}),
-                "key_3": ("STRING", {"default":"", "multiline": False}),
-                "value_3": ("STRING", {"default":"", "multiline": False}),
-                "key_4": ("STRING", {"default":"", "multiline": False}),
-                "value_4": ("STRING", {"default":"", "multiline": False}),
-                "key_5": ("STRING", {"default":"", "multiline": False}),
-                "value_5": ("STRING", {"default":"", "multiline": False}),
-            }
-        }
-    RETURN_TYPES = ("DICT",)
-    FUNCTION = "dictionary_new"
-
-    CATEGORY = "WAS Suite/Text"
-
-    def append_to_dictionary(self, dictionary, key, value):
-        if key is not None and key != "":
-            dictionary[key] = value
-        return dictionary
-
-    def dictionary_new(self, key_1, value_1, key_2, value_2, key_3, value_3, key_4, value_4, key_5, value_5):
-        dictionary = {}
-        dictionary = self.append_to_dictionary(dictionary, key_1, value_1)
-        dictionary = self.append_to_dictionary(dictionary, key_2, value_2)
-        dictionary = self.append_to_dictionary(dictionary, key_3, value_3)
-        dictionary = self.append_to_dictionary(dictionary, key_4, value_4)
-        dictionary = self.append_to_dictionary(dictionary, key_5, value_5)
-        return (dictionary, )
-
-
-# Text Dictionary Keys
-
-class WAS_Dictionary_Keys:
-    def __init__(self):
-        pass
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "dictionary": ("DICT",)
-            },
-            "optional": {}
-        }
-    RETURN_TYPES = ("LIST",)
-    FUNCTION = "dictionary_keys"
-
-    CATEGORY = "WAS Suite/Text"
-
-    def dictionary_keys(self, dictionary):
-        return (dictionary.keys(), )
-
-
-class WAS_Dictionary_to_Text:
-    def __init__(self):
-        pass
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "dictionary": ("DICT",)
-            },
-            "optional": {}
-        }
-    RETURN_TYPES = (TEXT_TYPE,)
-    FUNCTION = "dictionary_to_text"
-
-    CATEGORY = "WAS Suite/Text"
-
-    def dictionary_to_text(self, dictionary):
-        return (str(dictionary), )
-
-
 # Text String Node
 
 class WAS_Text_String:
@@ -12323,124 +12187,6 @@ class WAS_Boolean:
     def return_boolean(self, boolean_number=1):
         return (int(round(boolean_number)), int(round(boolean_number)))
 
-
-# Logical Comparisons Base Class
-
-class WAS_Logical_Comparisons:
-    def __init__(self):
-        pass
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "boolean_a": ("BOOLEAN", {"default": False}),
-                "boolean_b": ("BOOLEAN", {"default": False}),
-            }
-        }
-
-    RETURN_TYPES = ("BOOLEAN",)
-    FUNCTION = "do"
-
-    CATEGORY = "WAS Suite/Logic"
-
-    def do(self, boolean_a, boolean_b):
-        pass
-
-
-# Logical OR
-
-class WAS_Logical_OR(WAS_Logical_Comparisons):
-    def do(self, boolean_a, boolean_b):
-        return (boolean_a or boolean_b,)
-
-
-# Logical AND
-
-class WAS_Logical_AND(WAS_Logical_Comparisons):
-    def do(self, boolean_a, boolean_b):
-        return (boolean_a and boolean_b,)
-
-
-# Logical XOR
-
-class WAS_Logical_XOR(WAS_Logical_Comparisons):
-    def do(self, boolean_a, boolean_b):
-        return (boolean_a != boolean_b,)
-
-
-
-# Boolean
-
-class WAS_Boolean_Primitive:
-    def __init__(self):
-        pass
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "boolean": ("BOOLEAN", {"default": False}),
-            }
-        }
-
-    RETURN_TYPES = ("BOOLEAN",)
-    FUNCTION = "do"
-
-    CATEGORY = "WAS Suite/Logic"
-
-    def do(self, boolean):
-        return (boolean,)
-
-
-# Boolean
-
-class WAS_Boolean_To_Text:
-    def __init__(self):
-        pass
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "boolean": ("BOOLEAN", {"default": False}),
-            }
-        }
-
-    RETURN_TYPES = (TEXT_TYPE,)
-    FUNCTION = "do"
-
-    CATEGORY = "WAS Suite/Logic"
-
-    def do(self, boolean):
-        if boolean:
-            return ("True",)
-        return ("False",)
-
-
-# Logical NOT
-
-class WAS_Logical_NOT:
-    def __init__(self):
-        pass
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "boolean": ("BOOLEAN", {"default": False}),
-            }
-        }
-
-    RETURN_TYPES = ("BOOLEAN",)
-    FUNCTION = "do"
-
-    CATEGORY = "WAS Suite/Logic"
-
-    def do(self, boolean):
-        return (not boolean,)
-
-
 # NUMBER OPERATIONS
 
 
@@ -13110,37 +12856,6 @@ class WAS_Text_Input_Switch:
             return (text_b, )
 
 
-# TEXT CONTAINS
-
-class WAS_Text_Contains:
-    def __init__(self):
-        pass
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "text": ("STRING", {"default": '', "multiline": False}),
-                "sub_text": ("STRING", {"default": '', "multiline": False}),
-            },
-            "optional": {
-                "case_insensitive": ("BOOLEAN", {"default": True}),
-            }
-        }
-
-    RETURN_TYPES = ("BOOLEAN",)
-    FUNCTION = "text_contains"
-
-    CATEGORY = "WAS Suite/Logic"
-
-    def text_contains(self, text, sub_text, case_insensitive):
-        if case_insensitive:
-            sub_text = sub_text.lower()
-            text = text.lower()
-
-        return (sub_text in text,)
-
-
 # DEBUG INPUT TO CONSOLE
 
 
@@ -13381,7 +13096,7 @@ class WAS_Upscale_Model_Loader:
     def load_model(self, model_name):
         model_path = comfy_paths.get_full_path("upscale_models", model_name)
         sd = comfy.utils.load_torch_file(model_path)
-        out = model_loading.load_state_dict(sd).eval()
+        out = ModelLoader().load_from_state_dict(sd).eval()
         return (out,model_name)
 
 # VIDEO WRITER
@@ -13850,11 +13565,6 @@ NODE_CLASS_MAPPINGS = {
     "Latent Input Switch": WAS_Latent_Input_Switch,
     "Load Cache": WAS_Load_Cache,
     "Logic Boolean": WAS_Boolean,
-    "Logic Boolean Primitive": WAS_Boolean_Primitive,
-    "Logic Comparison OR": WAS_Logical_OR,
-    "Logic Comparison AND": WAS_Logical_AND,
-    "Logic Comparison XOR": WAS_Logical_XOR,
-    "Logic NOT": WAS_Logical_NOT,
     "Lora Loader": WAS_Lora_Loader,
     "Image SSAO (Ambient Occlusion)": WAS_Image_Ambient_Occlusion,
     "Image SSDO (Direct Occlusion)": WAS_Image_Direct_Occlusion,
@@ -13925,7 +13635,6 @@ NODE_CLASS_MAPPINGS = {
     "Image Voronoi Noise Filter": WAS_Image_Voronoi_Noise_Filter,
     "KSampler (WAS)": WAS_KSampler,
     "KSampler Cycle": WAS_KSampler_Cycle,
-    "Latent Batch": WAS_Latent_Batch,
     "Latent Noise Injection": WAS_Latent_Noise,
     "Latent Size to Number": WAS_Latent_Size_To_Number,
     "Latent Upscale by Factor (WAS)": WAS_Latent_Upscale,
@@ -13970,7 +13679,6 @@ NODE_CLASS_MAPPINGS = {
     "Number to Seed": WAS_Number_To_Seed,
     "Number to String": WAS_Number_To_String,
     "Number to Text": WAS_Number_To_Text,
-    "Boolean To Text": WAS_Boolean_To_Text,
     "Prompt Styles Selector": WAS_Prompt_Styles_Selector,
     "Prompt Multiple Styles Selector": WAS_Prompt_Multiple_Styles_Selector,
     "Random Number": WAS_Random_Number,
@@ -13994,9 +13702,6 @@ NODE_CLASS_MAPPINGS = {
     "Text Dictionary Update": WAS_Dictionary_Update,
     "Text Dictionary Get": WAS_Dictionary_Get,
     "Text Dictionary Convert": WAS_Dictionary_Convert,
-    "Text Dictionary New": WAS_Dictionary_New,
-    "Text Dictionary Keys": WAS_Dictionary_Keys,
-    "Text Dictionary To Text": WAS_Dictionary_to_Text,
     "Text Add Tokens": WAS_Text_Add_Tokens,
     "Text Add Token by Input": WAS_Text_Add_Token_Input,
     "Text Compare": WAS_Text_Compare,
@@ -14017,7 +13722,6 @@ NODE_CLASS_MAPPINGS = {
     "Text Random Line": WAS_Text_Random_Line,
     "Text Random Prompt": WAS_Text_Random_Prompt,
     "Text String": WAS_Text_String,
-    "Text Contains": WAS_Text_Contains,
     "Text Shuffle": WAS_Text_Shuffle,
     "Text to Conditioning": WAS_Text_to_Conditioning,
     "Text to Console": WAS_Text_to_Console,
