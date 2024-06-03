@@ -52,6 +52,8 @@
 #Pipfile.lock
 #poetry.lock
 *$py.class
+**/*.py[cod]
+**/__pycache__/
 *.ckpt
 *.conditioning
 *.cover
@@ -105,6 +107,7 @@
 .spyproject
 .tox/
 .venv
+.vs
 .webassets-cache
 /.vs
 /input/
@@ -163,3 +166,4 @@ was_suite_config.json
 was_suite_settings.json
 wheels/
 workflows/
+workspace*/
