@@ -201,8 +201,6 @@ was_conf_template = {
                     "text_nodes_type": "STRING",
                     "webui_styles": None,
                     "webui_styles_persistent_update": True,
-                    "blip_model_url": "https://storage.googleapis.com/sfr-vision-language-research/BLIP/models/model_base_capfilt_large.pth",
-                    "blip_model_vqa_url": "https://storage.googleapis.com/sfr-vision-language-research/BLIP/models/model_base_vqa_capfilt_large.pth",
                     "sam_model_vith_url": "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth",
                     "sam_model_vitl_url": "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_l_0b3195.pth",
                     "sam_model_vitb_url": "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth",
@@ -332,8 +330,8 @@ if was_config.__contains__('webui_styles'):
 
 # Freeze PIP modules
 def packages(versions=False):
-    import sys
-    import subprocess
+
+
     return [( r.decode().split('==')[0] if not versions else r.decode() ) for r in subprocess.check_output([sys.executable, '-s', '-m', 'pip', 'freeze']).split()]
 
 def install_package(package, uninstall_first: Union[List[str], str] = None):
@@ -508,9 +506,9 @@ def nsp_parse(text, seed=0, noodle_key='__', nspterminology=None, pantry_path=No
     return new_text
     
 # Advanced wildcard parser:
-import os
-import hashlib
-import numpy as np
+
+
+
 import mmap
 import struct
 
@@ -523,11 +521,10 @@ def custom_seed(seed_str):
 
 # Simple wildcard parser:
 
-import os
-import mmap
-import random
-import numpy as np
-from random import SystemRandom
+
+
+
+
 
 def replace_wildcards(text, seed=None, noodle_key='__'):
     """
@@ -1175,7 +1172,6 @@ class WAS_Tools_Class():
 
         def write(self, image, gif_path):
 
-            import cv2
 
             if not os.path.isfile(gif_path):
                 with Image.new("RGBA", image.size) as new_gif:
@@ -1334,8 +1330,8 @@ class WAS_Tools_Class():
             return ""
 
         def create_video(self, image_folder, video_path):
-            import cv2
-            from tqdm import tqdm
+
+
 
             image_paths = sorted([os.path.join(image_folder, f) for f in os.listdir(image_folder)
                                   if os.path.isfile(os.path.join(image_folder, f))
@@ -1418,7 +1414,7 @@ class WAS_Tools_Class():
             return resized
 
         def generate_transition_frames(self, img1, img2, num_frames):
-            import cv2
+
             if img1 is None and img2 is None:
                 return []
 
@@ -1442,7 +1438,7 @@ class WAS_Tools_Class():
             return frame_sequence
 
         def pil2cv(self, img):
-            import cv2
+
             img = np.array(img)
             img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
             return img
@@ -1482,7 +1478,7 @@ class WAS_Tools_Class():
 
         @staticmethod
         def crop_minority_region(image, padding=0):
-            from scipy.ndimage import label
+
             grayscale_image = image.convert("L")
             binary_image = grayscale_image.point(lambda x: 255 if x > 128 else 0, mode="1")
             labeled_image, num_labels = label(np.array(binary_image))
@@ -1530,7 +1526,7 @@ class WAS_Tools_Class():
 
         @staticmethod
         def dominant_region(image, threshold=128):
-            from scipy.ndimage import label
+
             image = ImageOps.invert(image.convert("L"))
             binary_image = image.point(lambda x: 255 if x > threshold else 0, mode="1")
             l, n = label(np.array(binary_image))
@@ -1546,7 +1542,7 @@ class WAS_Tools_Class():
 
         @staticmethod
         def minority_region(image, threshold=128):
-            from scipy.ndimage import label
+
             image = image.convert("L")
             binary_image = image.point(lambda x: 255 if x > threshold else 0, mode="1")
             labeled_array, num_features = label(np.array(binary_image))
@@ -1736,7 +1732,6 @@ class WAS_Tools_Class():
         if 'pilgram' not in packages():
             install_package('pilgram')
 
-        import pilgram
 
         alpha = None
         if image.mode == 'RGBA':
@@ -1781,7 +1776,6 @@ class WAS_Tools_Class():
         if 'pilgram' not in packages():
             install_package('pilgram')
 
-        import pilgram
 
         image = image.convert('RGBA')
         contrast_enhancer = ImageEnhance.Contrast(image)
@@ -1959,9 +1953,7 @@ class WAS_Tools_Class():
         img = img.filter(ImageFilter.GaussianBlur(radius=blur))
 
         return img
-
-
-
+    
 
     # Version 2 optimized based on Mark Setchell's ideas
     def gradient_map(self, image, gradient_map, reverse=False):
@@ -2304,7 +2296,6 @@ class WAS_Tools_Class():
         if 'matplotlib' not in packages():
             install_package('matplotlib')
 
-        import matplotlib.pyplot as plt
 
         # Split the image into its RGB channels
         r, g, b = image.split()
@@ -2433,9 +2424,31 @@ class WAS_Tools_Class():
 
         return palette, '\n'.join(hex_palette)
 
-#! IMAGE FILTER NODES
 
-# IMAGE ADJUSTMENTS NODES
+from transformers import BlipProcessor, BlipForConditionalGeneration, BlipForQuestionAnswering
+
+class BlipWrapper:
+    def __init__(self, caption_model_id="Salesforce/blip-image-captioning-base", vqa_model_id="Salesforce/blip-vqa-base", device="cuda", cache_dir=None):
+        self.device = torch.device(device='cuda' if device == "cuda" and torch.cuda.is_available() else 'cpu')
+        self.caption_processor = BlipProcessor.from_pretrained(caption_model_id, cache_dir=cache_dir)
+        self.caption_model = BlipForConditionalGeneration.from_pretrained(caption_model_id, cache_dir=cache_dir).to(self.device)
+        self.vqa_processor = BlipProcessor.from_pretrained(vqa_model_id, cache_dir=cache_dir)
+        self.vqa_model = BlipForQuestionAnswering.from_pretrained(vqa_model_id, cache_dir=cache_dir).to(self.device)
+
+    def generate_caption(self, image: Image.Image, min_length=50, max_length=100, num_beams=5, no_repeat_ngram_size=2, early_stopping=False):
+        self.caption_model.eval()
+        inputs = self.caption_processor(images=image, return_tensors="pt").to(self.device)
+        outputs = self.caption_model.generate(**inputs, min_length=min_length, max_length=max_length, num_beams=num_beams, no_repeat_ngram_size=no_repeat_ngram_size, early_stopping=early_stopping)
+        return self.caption_processor.decode(outputs[0], skip_special_tokens=True)
+
+    def answer_question(self, image: Image.Image, question: str, min_length=50, max_length=100, num_beams=5, no_repeat_ngram_size=2, early_stopping=False):
+        self.vqa_model.eval()
+        inputs = self.vqa_processor(images=image, text=question, return_tensors="pt").to(self.device)
+        answer_ids = self.vqa_model.generate(**inputs, min_length=min_length, max_length=max_length, num_beams=num_beams, no_repeat_ngram_size=no_repeat_ngram_size, early_stopping=early_stopping)
+        return self.vqa_processor.decode(answer_ids[0], skip_special_tokens=True)
+
+
+#! IMAGE FILTER NODES
 
 # IMAGE SHADOW AND HIGHLIGHT ADJUSTMENTS
 
@@ -2474,7 +2487,7 @@ class WAS_Shadow_And_Highlight_Adjustment:
         return (pil2tensor(result), pil2tensor(shadows), pil2tensor(highlights) )
 
 
-# IMAGE PIXATE
+# IMAGE PIXELATE
 
 class WAS_Image_Pixelate:
     def __init__(self):
@@ -2530,7 +2543,6 @@ class WAS_Image_Pixelate:
     def pixel_art_batch(self, batch, min_size, num_colors=16, init_mode='random', max_iter=100, random_state=42,
                             palette=None, palette_mode="Linear", reverse_palette=False, dither=False, dither_mode='FloydSteinberg'):
 
-        from sklearn.cluster import KMeans
 
         hex_palette_to_rgb = lambda hex: tuple(int(hex[i:i+2], 16) for i in (0, 2, 4))
 
@@ -3020,7 +3032,7 @@ class WAS_Image_Style_Filter:
             install_package('pilgram')
 
         # Import Pilgram module
-        import pilgram
+
 
         # WAS Filters
         WTools = WAS_Tools_Class()
@@ -3125,7 +3137,6 @@ class WAS_Image_Crop_Face:
 
     def crop_face(self, image, cascade_name=None, padding=0.25):
 
-        import cv2
 
         img = np.array(image.convert('RGB'))
 
@@ -4125,7 +4136,7 @@ class WAS_Image_Blending_Mode:
             install_package("pilgram")
 
         # Import Pilgram module
-        import pilgram
+
 
         # Convert images to PIL
         img_a = tensor2pil(image_a)
@@ -4752,6 +4763,55 @@ class WAS_Image_Batch:
         return (batched_tensors,)
 
 
+# Latent TO BATCH
+
+class WAS_Latent_Batch:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+            },
+            "optional": {
+                "latent_a": ("LATENT",),
+                "latent_b": ("LATENT",),
+                "latent_c": ("LATENT",),
+                "latent_d": ("LATENT",),
+            },
+        }
+
+    RETURN_TYPES = ("LATENT",)
+    RETURN_NAMES = ("latent",)
+    FUNCTION = "latent_batch"
+    CATEGORY = "WAS Suite/Latent"
+
+    def _check_latent_dimensions(self, tensors, names):
+        dimensions = [(tensor["samples"].shape) for tensor in tensors]
+        if len(set(dimensions)) > 1:
+            mismatched_indices = [i for i, dim in enumerate(dimensions) if dim[1] != dimensions[0][1]]
+            mismatched_latents = [names[i] for i in mismatched_indices]
+            if mismatched_latents:
+                raise ValueError(f"WAS latent Batch Warning: Input latent dimensions do not match for latents: {mismatched_latents}")
+
+    def latent_batch(self, **kwargs):
+        batched_tensors = [kwargs[key] for key in kwargs if kwargs[key] is not None]
+        latent_names = [key for key in kwargs if kwargs[key] is not None]
+
+        if not batched_tensors:
+            raise ValueError("At least one input latent must be provided.")
+
+        self._check_latent_dimensions(batched_tensors, latent_names)
+        samples_out = {}
+        samples_out["samples"]  = torch.cat([tensor["samples"] for tensor in batched_tensors], dim=0)
+        samples_out["batch_index"] = []
+        for tensor in batched_tensors:
+            cindex = tensor.get("batch_index", list(range(tensor["samples"].shape[0])))
+            samples_out["batch_index"] += cindex
+        return (samples_out,)
+
+
 # MASK TO BATCH
 
 class WAS_Mask_Batch:
@@ -4917,7 +4977,6 @@ class WAS_Image_Generate_Gradient:
 
     def image_gradient(self, gradient_stops, width=512, height=512, direction='horizontal', tolerance=0):
 
-        import io
 
         # WAS Filters
         WTools = WAS_Tools_Class()
@@ -5331,7 +5390,7 @@ class WAS_Image_Padding:
 
     def image_padding(self, image, feathering, left_padding, right_padding, top_padding, bottom_padding, feather_second_pass=True):
         padding = self.apply_image_padding(tensor2pil(
-            image), left_padding, right_padding, top_padding, bottom_padding, feathering, second_pass=True)
+            image), left_padding, right_padding, top_padding, bottom_padding, feathering, second_pass=feather_second_pass)
         return (pil2tensor(padding[0]), pil2tensor(padding[1]))
 
     def apply_image_padding(self, image, left_pad=100, right_pad=100, top_pad=100, bottom_pad=100, feather_radius=50, second_pass=True):
@@ -6313,7 +6372,6 @@ class WAS_Canny_Filter:
 
     def Canny_detector(self, img, weak_th=None, strong_th=None):
 
-        import cv2
 
         img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         img = cv2.GaussianBlur(img, (5, 5), 1.4)
@@ -6446,7 +6504,6 @@ class WAS_Image_fDOF:
 
     def fdof_composite(self, image, depth, radius, samples, mode):
 
-        import cv2 as cv
 
         # Convert tensor to a PIL Image
         tensor_images = []
@@ -6970,7 +7027,7 @@ class WAS_Image_Direct_Occlusion:
 
 
     def dominant_region(self, image, threshold=128):
-        from scipy.ndimage import label
+
         image = ImageOps.invert(image.convert("L"))
         binary_image = image.point(lambda x: 255 if x > threshold else 0, mode="1")
         l, n = label(np.array(binary_image))
@@ -7119,7 +7176,9 @@ class WAS_Image_Save:
                 "filename_number_padding": ("INT", {"default":4, "min":1, "max":9, "step":1}),
                 "filename_number_start": (["false", "true"],),
                 "extension": (['png', 'jpg', 'jpeg', 'gif', 'tiff', 'webp', 'bmp'], ),
+                "dpi": ("INT", {"default": 300, "min": 1, "max": 2400, "step": 1}),
                 "quality": ("INT", {"default": 100, "min": 1, "max": 100, "step": 1}),
+                "optimize_image": (["true", "false"],),
                 "lossless_webp": (["false", "true"],),
                 "overwrite_mode": (["false", "prefix_as_filename"],),
                 "show_history": (["false", "true"],),
@@ -7132,7 +7191,9 @@ class WAS_Image_Save:
             },
         }
 
-    RETURN_TYPES = ()
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("images",)
+    
     FUNCTION = "was_save_images"
 
     OUTPUT_NODE = True
@@ -7140,7 +7201,7 @@ class WAS_Image_Save:
     CATEGORY = "WAS Suite/IO"
 
     def was_save_images(self, images, output_path='', filename_prefix="ComfyUI", filename_delimiter='_',
-                        extension='png', quality=100, lossless_webp="false", prompt=None, extra_pnginfo=None,
+                        extension='png', dpi=96, quality=100, optimize_image="true", lossless_webp="false", prompt=None, extra_pnginfo=None,
                         overwrite_mode='false', filename_number_padding=4, filename_number_start='false',
                         show_history='false', show_history_by_prefix="true", embed_workflow="true",
                         show_previews="true"):
@@ -7148,6 +7209,7 @@ class WAS_Image_Save:
         delimiter = filename_delimiter
         number_padding = filename_number_padding
         lossless_webp = (lossless_webp == "true")
+        optimize_image = (optimize_image == "true")
 
         # Define token system
         tokens = TextTokens()
@@ -7249,21 +7311,21 @@ class WAS_Image_Save:
                 output_file = os.path.abspath(os.path.join(output_path, file))
                 if extension in ["jpg", "jpeg"]:
                     img.save(output_file,
-                             quality=quality, optimize=True)
+                             quality=quality, optimize=optimize_image, dpi=(dpi, dpi))
                 elif extension == 'webp':
                     img.save(output_file,
                              quality=quality, lossless=lossless_webp, exif=exif_data)
                 elif extension == 'png':
                     img.save(output_file,
-                             pnginfo=exif_data, optimize=True)
+                             pnginfo=exif_data, optimize=optimize_image)
                 elif extension == 'bmp':
                     img.save(output_file)
                 elif extension == 'tiff':
                     img.save(output_file,
-                             quality=quality, optimize=True)
+                             quality=quality, optimize=optimize_image)
                 else:
                     img.save(output_file,
-                             pnginfo=exif_data, optimize=True)
+                             pnginfo=exif_data, optimize=optimize_image)
 
                 cstr(f"Image file saved to: {output_file}").msg.print()
 
@@ -7326,9 +7388,9 @@ class WAS_Image_Save:
                 results.append(image_data)
 
         if show_previews == 'true':
-            return {"ui": {"images": results}}
+            return {"ui": {"images": results}, "result": (images,)}
         else:
-            return {"ui": {"images": []}}
+            return {"ui": {"images": []}, "result": (images,)}
 
     def get_subfolder_path(self, image_path, output_path):
         output_parts = output_path.strip(os.sep).split(os.sep)
@@ -7369,11 +7431,13 @@ class WAS_Load_Image:
         RGBA = (RGBA == 'true')
 
         if image_path.startswith('http'):
-            from io import BytesIO
+
             i = self.download_image(image_path)
+            i = ImageOps.exif_transpose(i)
         else:
             try:
                 i = Image.open(image_path)
+                i = ImageOps.exif_transpose(i)
             except OSError:
                 cstr(f"The image `{image_path.strip()}` specified doesn't exist!").error.print()
                 i = Image.new(mode='RGB', size=(512, 512), color=(0, 0, 0))
@@ -8567,7 +8631,6 @@ class MiDaS_Depth_Approx:
         if not MIDAS_INSTALLED:
             self.install_midas()
 
-        import cv2 as cv
 
         if midas_model:
 
@@ -8700,7 +8763,6 @@ class MiDaS_Background_Foreground_Removal:
         if not MIDAS_INSTALLED:
             self.install_midas()
 
-        import cv2 as cv
 
         # Convert the input image tensor to a numpy and PIL Image
         i = 255. * image.cpu().numpy().squeeze()
@@ -9468,7 +9530,7 @@ class WAS_Text_Multiline:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "text": ("STRING", {"default": '', "multiline": True}),
+                "text": ("STRING", {"default": '', "multiline": True, "dynamicPrompts": True}),
             }
         }
     RETURN_TYPES = (TEXT_TYPE,)
@@ -9477,7 +9539,7 @@ class WAS_Text_Multiline:
     CATEGORY = "WAS Suite/Text"
 
     def text_multiline(self, text):
-        import io
+
         new_text = []
         for line in io.StringIO(text):
             if not line.strip().startswith('#'):
@@ -9491,6 +9553,29 @@ class WAS_Text_Multiline:
 
         return (new_text, )
 
+
+class WAS_Text_Multiline_Raw:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "text": ("STRING", {"default": '', "multiline": True, "dynamicPrompts": False}),
+            }
+        }
+    RETURN_TYPES = (TEXT_TYPE,)
+    FUNCTION = "text_multiline"
+
+    CATEGORY = "WAS Suite/Text"
+
+    def text_multiline(self, text):
+        tokens = TextTokens()
+        new_text = tokens.parseTokens(text)
+
+        return (new_text, )
+    
 
 # Text List Concatenate Node
 
@@ -9970,23 +10055,23 @@ class WAS_Text_Concatenate:
                 "clean_whitespace": (["true", "false"],),
             },
             "optional": {
-                "text_a": (TEXT_TYPE, {"forceInput": (True if TEXT_TYPE == 'STRING' else False)}),
-                "text_b": (TEXT_TYPE, {"forceInput": (True if TEXT_TYPE == 'STRING' else False)}),
-                "text_c": (TEXT_TYPE, {"forceInput": (True if TEXT_TYPE == 'STRING' else False)}),
-                "text_d": (TEXT_TYPE, {"forceInput": (True if TEXT_TYPE == 'STRING' else False)}),
+                "text_a": ("STRING", {"forceInput": True}),
+                "text_b": ("STRING", {"forceInput": True}),
+                "text_c": ("STRING", {"forceInput": True}),
+                "text_d": ("STRING", {"forceInput": True}),
             }
         }
 
-    RETURN_TYPES = (TEXT_TYPE,)
+    RETURN_TYPES = ("STRING",)
     FUNCTION = "text_concatenate"
 
     CATEGORY = "WAS Suite/Text"
 
     def text_concatenate(self, delimiter, clean_whitespace, **kwargs):
-        text_inputs: list[str] = []
+        text_inputs = []
 
         # Handle special case where delimiter is "\n" (literal newline).
-        if delimiter == "\\n":
+        if delimiter in ("\n", "\\n"):
             delimiter = "\n"
 
         # Iterate over the received inputs in sorted order.
@@ -10010,6 +10095,39 @@ class WAS_Text_Concatenate:
         merged_text = delimiter.join(text_inputs)
 
         return (merged_text,)
+
+
+
+# Text Find
+
+
+# Note that these nodes are exposed as "Find", not "Search". This is the first class that follows the naming convention of the node itself.
+class WAS_Find:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "text": (TEXT_TYPE, {"forceInput": (True if TEXT_TYPE == 'STRING' else False)}),
+                "substring": ("STRING", {"default": '', "multiline": False}),
+                "pattern": ("STRING", {"default": '', "multiline": False}),
+            }
+        }
+
+    RETURN_TYPES = ("BOOLEAN")
+    RETURN_NAMES = ("found")
+    FUNCTION = "execute"
+
+    CATEGORY = "WAS Suite/Text/Search"
+
+    def execute(self, text, substring, pattern):
+        if substring:
+            return substring in text
+
+        return bool(re.search(pattern, text))
+
 
 
 # Text Search and Replace
@@ -10210,7 +10328,7 @@ class WAS_Text_Save:
                 "path": ("STRING", {"default": './ComfyUI/output/[time(%Y-%m-%d)]', "multiline": False}),
                 "filename_prefix": ("STRING", {"default": "ComfyUI"}),
                 "filename_delimiter": ("STRING", {"default":"_"}),
-                "filename_number_padding": ("INT", {"default":4, "min":2, "max":9, "step":1}),
+                "filename_number_padding": ("INT", {"default":4, "min":0, "max":9, "step":1}),
 
             }
         }
@@ -10249,7 +10367,8 @@ class WAS_Text_Save:
         return (text, { "ui": { "string": text } } )
 
     def generate_filename(self, path, prefix, delimiter, number_padding, extension):
-        pattern = f"{re.escape(prefix)}{re.escape(delimiter)}(\\d{{{number_padding}}})"
+        # Adjust the regex pattern to match one or more digits without fixed padding
+        pattern = f"{re.escape(prefix)}{re.escape(delimiter)}(\\d+)"
         existing_counters = [
             int(re.search(pattern, filename).group(1))
             for filename in os.listdir(path)
@@ -10262,10 +10381,19 @@ class WAS_Text_Save:
         else:
             counter = 1
 
-        filename = f"{prefix}{delimiter}{counter:0{number_padding}}{extension}"
+        # Adjust the format string based on number_padding
+        if number_padding > 0:
+            filename = f"{prefix}{delimiter}{counter:0{number_padding}}{extension}"
+        else:
+            filename = f"{prefix}{delimiter}{counter}{extension}"
+
+        # Ensure the generated filename does not already exist
         while os.path.exists(os.path.join(path, filename)):
             counter += 1
-            filename = f"{prefix}{delimiter}{counter:0{number_padding}}{extension}"
+            if number_padding > 0:
+                filename = f"{prefix}{delimiter}{counter:0{number_padding}}{extension}"
+            else:
+                filename = f"{prefix}{delimiter}{counter}{extension}"
 
         return filename
 
@@ -10325,7 +10453,6 @@ class WAS_Text_File_History:
         # Write to file history
         update_history_text_files(file_path)
 
-        import io
         lines = []
         for line in io.StringIO(text):
             if not line.strip().startswith('#'):
@@ -10418,7 +10545,6 @@ class WAS_Text_Add_Tokens:
 
     def text_add_tokens(self, tokens, print_current_tokens="false"):
 
-        import io
 
         # Token Parser
         tk = TextTokens()
@@ -10586,7 +10712,6 @@ class WAS_Text_Load_From_File:
         # Write to file history
         update_history_text_files(file_path)
 
-        import io
         lines = []
         for line in io.StringIO(text):
             if not line.strip().startswith('#'):
@@ -10851,7 +10976,9 @@ class WAS_BLIP_Model_Loader:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "blip_model": (["caption", "interrogate"], ),
+                "blip_model": ("STRING", {"default": "Salesforce/blip-image-captioning-base"}),
+                "vqa_model_id": ("STRING", {"default": "Salesforce/blip-vqa-base"}),
+                "device": (["cuda", "cpu"],),
             }
         }
 
@@ -10860,64 +10987,17 @@ class WAS_BLIP_Model_Loader:
 
     CATEGORY = "WAS Suite/Loaders"
 
-    def blip_model(self, blip_model):
+    def blip_model(self, blip_model, vqa_model_id, device):
 
-        if ( 'timm' not in packages()
-            or 'transformers' not in packages()
-            or 'fairscale' not in packages() ):
-            cstr(f"Modules or packages are missing to use BLIP models. Please run the `{os.path.join(WAS_SUITE_ROOT, 'requirements.txt')}` through ComfyUI's python executable.").error.print()
-            exit
+        blip_dir = os.path.join(comfy_paths.models_dir, "blip")
 
-        if 'transformers==4.26.1' not in packages(True):
-            cstr(f"`transformers==4.26.1` is required for BLIP models. Please run the `{os.path.join(WAS_SUITE_ROOT, 'requirements.txt')}` through ComfyUI's python executable.").error.print()
-            exit
+        # Attempt legacy support
+        if blip_model in ("caption", "interrogate"):
+            blip_model = "Salesforce/blip-image-captioning-base"
 
-        device = 'cpu'
-        conf = getSuiteConfig()
-        size = 384
+        blip_model = BlipWrapper(caption_model_id=blip_model, vqa_model_id=vqa_model_id, device=device, cache_dir=blip_dir)
 
-        if blip_model == 'caption':
-
-            from .modules.BLIP.blip_module import blip_decoder
-
-            blip_dir = os.path.join(MODELS_DIR, 'blip')
-            if not os.path.exists(blip_dir):
-                os.makedirs(blip_dir, exist_ok=True)
-
-            torch.hub.set_dir(blip_dir)
-
-            if conf.__contains__('blip_model_url'):
-                model_url = conf['blip_model_url']
-            else:
-                model_url = 'https://storage.googleapis.com/sfr-vision-language-research/BLIP/models/model_base_capfilt_large.pth'
-
-            model = blip_decoder(pretrained=model_url, image_size=size, vit='base')
-            model.eval()
-            model = model.to(device)
-
-        elif blip_model == 'interrogate':
-
-            from .modules.BLIP.blip_module import blip_vqa
-
-            blip_dir = os.path.join(MODELS_DIR, 'blip')
-            if not os.path.exists(blip_dir):
-                os.makedirs(blip_dir, exist_ok=True)
-
-            torch.hub.set_dir(blip_dir)
-
-            if conf.__contains__('blip_model_vqa_url'):
-                model_url = conf['blip_model_vqa_url']
-            else:
-                model_url = 'https://storage.googleapis.com/sfr-vision-language-research/BLIP/models/model_base_vqa_capfilt_large.pth'
-
-            model = blip_vqa(pretrained=model_url, image_size=size, vit='base')
-            model.eval()
-            model = model.to(device)
-
-        result = ( model, blip_model )
-
-        return ( result, )
-
+        return ( blip_model, )
 
 
 # BLIP CAPTION IMAGE
@@ -10930,105 +11010,47 @@ class WAS_BLIP_Analyze_Image:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "image": ("IMAGE",),
+                "images": ("IMAGE",),
                 "mode": (["caption", "interrogate"], ),
-                "question": ("STRING", {"default": "What does the background consist of?", "multiline": True}),
+                "question": ("STRING", {"default": "What does the background consist of?", "multiline": True, "dynamicPrompts": False}),
+                "blip_model": ("BLIP_MODEL",),
             },
             "optional": {
-                "blip_model": ("BLIP_MODEL",)
+                "min_length": ("INT", {"min": 1, "max": 1024, "default": 24}),
+                "max_length": ("INT", {"min": 2, "max": 1024, "default": 64}),
+                "num_beams": ("INT", {"min": 1, "max": 12, "default": 5}),
+                "no_repeat_ngram_size": ("INT", {"min": 1, "max": 12, "default": 3}),
+                "early_stopping": ("BOOLEAN", {"default": False})
             }
         }
 
-    RETURN_TYPES = (TEXT_TYPE,)
-    FUNCTION = "blip_caption_image"
+    RETURN_TYPES = (TEXT_TYPE, TEXT_TYPE)
+    OUTPUT_IS_LIST = (False, True)
 
+    FUNCTION = "blip_caption_image"
     CATEGORY = "WAS Suite/Text/AI"
 
-    def blip_caption_image(self, image, mode, question, blip_model=None):
+    def blip_caption_image(self, images, mode, question, blip_model, min_length=24, max_length=64, num_beams=5, no_repeat_ngram_size=3, early_stopping=False):
 
-        def transformImage(input_image, image_size, device):
-            raw_image = input_image.convert('RGB')
-            raw_image = raw_image.resize((image_size, image_size))
-            transform = transforms.Compose([
-                transforms.Resize(raw_image.size, interpolation=InterpolationMode.BICUBIC),
-                transforms.ToTensor(),
-                transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711))
-            ])
-            image = transform(raw_image).unsqueeze(0).to(device)
-            return image.view(1, -1, image_size, image_size)  # Change the shape of the output tensor
-
-        from torchvision import transforms
-        from torchvision.transforms.functional import InterpolationMode
-
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-        conf = getSuiteConfig()
-        image = tensor2pil(image)
-        size = 384
-        tensor = transformImage(image, size, device)
-
-        if blip_model:
-            mode = blip_model[1]
-
-        if mode == 'caption':
-
-            if blip_model:
-                model = blip_model[0].to(device)
+        captions = []
+        for image in images:
+            
+            pil_image = tensor2pil(image).convert("RGB")
+            
+            if mode == "caption":
+                cap = blip_model.generate_caption(image=pil_image, min_length=min_length, max_length=max_length, num_beams=num_beams, no_repeat_ngram_size=no_repeat_ngram_size, early_stopping=early_stopping)
+                captions.append(cap)
+                cstr(f"\033[33mBLIP Caption:\033[0m {cap}").msg.print()
             else:
-                from .modules.BLIP.blip_module import blip_decoder
+                cap = blip_model.answer_question(image=pil_image, question=question, min_length=min_length, max_length=max_length, num_beams=num_beams, no_repeat_ngram_size=no_repeat_ngram_size, early_stopping=early_stopping)
+                captions.append(cap)
+                cstr(f"\033[33m BLIP Answer:\033[0m {cap}").msg.print()
 
-                blip_dir = os.path.join(MODELS_DIR, 'blip')
-                if not os.path.exists(blip_dir):
-                    os.makedirs(blip_dir, exist_ok=True)
+            full_captions = ""
+            for i, caption in enumerate(captions):
+                full_captions += caption + ("\n\n" if i < len(captions) else "")
 
-                torch.hub.set_dir(blip_dir)
-
-                if conf.__contains__('blip_model_url'):
-                    model_url = conf['blip_model_url']
-                else:
-                    model_url = 'https://storage.googleapis.com/sfr-vision-language-research/BLIP/models/model_base_capfilt_large.pth'
-
-                model = blip_decoder(pretrained=model_url, image_size=size, vit='base')
-                model.eval()
-                model = model.to(device)
-
-            with torch.no_grad():
-                caption = model.generate(tensor, sample=False, num_beams=6, max_length=74, min_length=20)
-                # nucleus sampling
-                #caption = model.generate(tensor, sample=True, top_p=0.9, max_length=75, min_length=10)
-                cstr(f"\033[33mBLIP Caption:\033[0m {caption[0]}").msg.print()
-                return (caption[0], )
-
-        elif mode == 'interrogate':
-
-            if blip_model:
-                model = blip_model[0].to(device)
-            else:
-                from .modules.BLIP.blip_module import blip_vqa
-
-                blip_dir = os.path.join(MODELS_DIR, 'blip')
-                if not os.path.exists(blip_dir):
-                    os.makedirs(blip_dir, exist_ok=True)
-
-                torch.hub.set_dir(blip_dir)
-
-                if conf.__contains__('blip_model_vqa_url'):
-                    model_url = conf['blip_model_vqa_url']
-                else:
-                    model_url = 'https://storage.googleapis.com/sfr-vision-language-research/BLIP/models/model_base_vqa_capfilt_large.pth'
-
-                model = blip_vqa(pretrained=model_url, image_size=size, vit='base')
-                model.eval()
-                model = model.to(device)
-
-            with torch.no_grad():
-                answer = model(tensor, question, train=False, inference='generate')
-                cstr(f"\033[33m BLIP Answer:\033[0m {answer[0]}").msg.print()
-                return (answer[0], )
-
-        else:
-            cstr(f"The selected mode `{mode}` is not a valid selection!").error.print()
-            return ('Invalid BLIP mode!', )
+        return (full_captions, captions)
 
 
 # CLIPSeg Model Loader
@@ -11086,7 +11108,7 @@ class WAS_CLIPSeg:
     CATEGORY = "WAS Suite/Image/Masking"
 
     def CLIPSeg_image(self, image, text=None, clipseg_model=None):
-        from transformers import CLIPSegProcessor, CLIPSegForImageSegmentation
+
 
         image = tensor2pil(image)
         cache = os.path.join(MODELS_DIR, 'clipseg')
@@ -11144,7 +11166,7 @@ class WAS_CLIPSeg_Batch:
 
     def CLIPSeg_images(self, image_a, image_b, text_a, text_b, image_c=None, image_d=None,
                        image_e=None, image_f=None, text_c=None, text_d=None, text_e=None, text_f=None):
-        from transformers import CLIPSegProcessor, CLIPSegForImageSegmentation
+
         import torch.nn.functional as F
 
         images_pil = [tensor2pil(image_a), tensor2pil(image_b)]
@@ -11924,7 +11946,7 @@ class WAS_Constant_Number:
         return {
             "required": {
                 "number_type": (["integer", "float", "bool"],),
-                "number": ("FLOAT", {"default": 0, "min": -18446744073709551615, "max": 18446744073709551615}),
+                "number": ("FLOAT", {"default": 0, "min": -18446744073709551615, "max": 18446744073709551615, "step": 0.01}),
             },
             "optional": {
                 "number_as_text": (TEXT_TYPE, {"forceInput": (True if TEXT_TYPE == 'STRING' else False)}),
@@ -11950,7 +11972,7 @@ class WAS_Constant_Number:
         if number_type:
             if number_type == 'integer':
                 return (int(number), float(number), int(number) )
-            elif number_type == 'integer':
+            elif number_type == 'float':
                 return (float(number), float(number), int(number) )
             elif number_type == 'bool':
                 boolean = (1 if float(number) > 0.5 else 0)
@@ -12210,17 +12232,135 @@ class WAS_Boolean:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "boolean_number": ("FLOAT", {"default":1, "min":0, "max":1, "step":1}),
+                "boolean": ("FLOAT", {"default": 1, "min": 0.0, "max": 1.0, "step": 0.01}),
             }
         }
 
-    RETURN_TYPES = ("NUMBER","INT")
+    RETURN_TYPES = ("BOOLEAN", "NUMBER", "INT", "FLOAT")
     FUNCTION = "return_boolean"
 
     CATEGORY = "WAS Suite/Logic"
 
     def return_boolean(self, boolean_number=True):
         return (int(round(boolean_number)), int(round(boolean_number)))
+
+
+# Logical Comparisons Base Class
+
+class WAS_Logical_Comparisons:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "boolean_a": ("BOOLEAN", {"default": False}),
+                "boolean_b": ("BOOLEAN", {"default": False}),
+            }
+        }
+
+    RETURN_TYPES = ("BOOLEAN",)
+    FUNCTION = "do"
+
+    CATEGORY = "WAS Suite/Logic"
+
+    def do(self, boolean_a, boolean_b):
+        pass
+
+
+# Logical OR
+
+class WAS_Logical_OR(WAS_Logical_Comparisons):
+    def do(self, boolean_a, boolean_b):
+        return (boolean_a or boolean_b,)
+
+
+# Logical AND
+
+class WAS_Logical_AND(WAS_Logical_Comparisons):
+    def do(self, boolean_a, boolean_b):
+        return (boolean_a and boolean_b,)
+
+
+# Logical XOR
+
+class WAS_Logical_XOR(WAS_Logical_Comparisons):
+    def do(self, boolean_a, boolean_b):
+        return (boolean_a != boolean_b,)
+
+
+
+# Boolean
+
+class WAS_Boolean_Primitive:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "boolean": ("BOOLEAN", {"default": False}),
+            }
+        }
+
+    RETURN_TYPES = ("BOOLEAN",)
+    FUNCTION = "do"
+
+    CATEGORY = "WAS Suite/Logic"
+
+    def do(self, boolean):
+        return (boolean,)
+
+
+# Boolean
+
+class WAS_Boolean_To_Text:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "boolean": ("BOOLEAN", {"default": False}),
+            }
+        }
+
+    RETURN_TYPES = (TEXT_TYPE,)
+    FUNCTION = "do"
+
+    CATEGORY = "WAS Suite/Logic"
+
+    def do(self, boolean):
+        if boolean:
+            return ("True",)
+        return ("False",)
+
+
+# Logical NOT
+
+class WAS_Logical_NOT:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "boolean": ("BOOLEAN", {"default": False}),
+            }
+        }
+
+    RETURN_TYPES = ("BOOLEAN",)
+    FUNCTION = "do"
+
+    CATEGORY = "WAS Suite/Logic"
+
+    def do(self, boolean):
+        return (not boolean,)
+
 
 # NUMBER OPERATIONS
 
@@ -13464,7 +13604,6 @@ class WAS_Load_Cache:
         if 'joblib' not in packages():
             install_package('joblib')
 
-        import joblib
 
         input_path = os.path.join(WAS_SUITE_ROOT, 'cache')
 
@@ -13745,12 +13884,14 @@ NODE_CLASS_MAPPINGS = {
     "Text Find and Replace by Dictionary": WAS_Search_and_Replace_Dictionary,
     "Text Find and Replace Input": WAS_Search_and_Replace_Input,
     "Text Find and Replace": WAS_Search_and_Replace,
+    "Text Find": WAS_Find,
     "Text Input Switch": WAS_Text_Input_Switch,
     "Text List": WAS_Text_List,
     "Text List Concatenate": WAS_Text_List_Concatenate,
     "Text List to Text": WAS_Text_List_to_Text,
     "Text Load Line From File": WAS_Text_Load_Line_From_File,
     "Text Multiline": WAS_Text_Multiline,
+    "Text Multiline (Code Compatible)": WAS_Text_Multiline_Raw,
     "Text Parse A1111 Embeddings": WAS_Text_Parse_Embeddings_By_Name,
     "Text Parse Noodle Soup Prompts": WAS_Text_Parse_NSP,
     "Text Parse Tokens": WAS_Text_Parse_Tokens,
@@ -13841,7 +13982,7 @@ if os.path.exists(BKAdvCLIP_dir):
 # opencv-python-headless handling
 if 'opencv-python' in packages() or 'opencv-python-headless' in packages():
     try:
-        import cv2
+
         build_info = ' '.join(cv2.getBuildInformation().split())
         if "FFMPEG: YES" in build_info:
             if was_config.__contains__('show_startup_junk'):
@@ -13863,14 +14004,14 @@ if 'opencv-python' in packages() or 'opencv-python-headless' in packages():
             uninstall_first=['opencv-python', 'opencv-python-headless[ffmpeg]']
         )
         try:
-            import cv2
+
             cstr("OpenCV Python installed.").msg.print()
         except ImportError:
             cstr("OpenCV Python module still cannot be imported. There is a system conflict.").error.print()
 else:
     install_package('opencv-python-headless[ffmpeg]')
     try:
-        import cv2
+
         cstr("OpenCV Python installed.").msg.print()
     except ImportError:
         cstr("OpenCV Python module still cannot be imported. There is a system conflict.").error.print()
@@ -13892,7 +14033,7 @@ except ImportError as e:
         package='scikit-image',
         uninstall_first=['scikit-image']
     )
-    import skimage
+
 
 was_conf = getSuiteConfig()
 
